@@ -8,10 +8,18 @@ const budgetService = require('./services/BudgetService');
 
 const app = express();
 
-// Crear directorio de uploads si no existe
-const uploadsDir = path.join(__dirname, '..', 'uploads');
+// Configuración de directorio de uploads (Vercel usa /tmp para escritura)
+const isVercel = process.env.VERCEL || process.env.NOW_BUILDER;
+const uploadsDir = isVercel 
+  ? path.join('/tmp', 'uploads') 
+  : path.join(__dirname, '..', 'uploads');
+
 if (!fs.existsSync(uploadsDir)) {
-  fs.mkdirSync(uploadsDir, { recursive: true });
+  try {
+    fs.mkdirSync(uploadsDir, { recursive: true });
+  } catch (err) {
+    console.warn(`⚠️ No se pudo crear el directorio de uploads: ${err.message}`);
+  }
 }
 
 // Middleware
