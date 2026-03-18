@@ -123,17 +123,18 @@ function App() {
     const init = async () => {
       setLoading(true);
       try {
-        await loadDefaultBudget();
-      } catch (err) {
-        console.error('Error cargando presupuesto por defecto:', err);
-      }
-      try {
+        // Intentar cargar presupuesto base/defecto (puede omitirse si ya hay datos en Supabase)
+        await loadDefaultBudget().catch(e => console.warn('Omitiendo carga inicial:', e.message));
         await loadData({});
         await loadLines({});
         await loadAllLines();
         await loadEerrLines([1]); // Default escenario
-      } catch (err) {
-        console.error('Error en carga inicial:', err);
+      } catch (error) {
+        console.error('Error inicializando:', error);
+        // Solo alertar si falla la carga de datos (loadData)
+        if (error.message.includes('servidor')) {
+          alert('Error al conectar con el servidor. Por favor verifica tu conexión.');
+        }
       } finally {
         setLoading(false);
       }
