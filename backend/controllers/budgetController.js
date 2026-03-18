@@ -50,10 +50,22 @@ router.post('/upload', upload.single('file'), async (req, res) => {
  */
 router.post('/load-default', async (req, res) => {
   try {
+    const fs = require('fs');
     const defaultPath = (req.body && req.body.filePath) ? req.body.filePath : path.join(
       __dirname, '..', '..', 'Presupuesto general A-MAQ 2026 Rev 13-01-25 - 7300.xlsx'
     );
     const sheetName = (req.body && req.body.sheetName) ? req.body.sheetName : 'Detalle';
+
+    if (!fs.existsSync(defaultPath)) {
+      console.warn(`⚠️ Archivo por defecto no encontrado en: ${defaultPath}. Omitiendo carga inicial.`);
+      // Si el archivo no existe, simplemente respondemos éxito para permitir que la app use los datos de Supabase
+      return res.json({
+        message: 'Archivo base no encontrado. Se utilizarán los datos existentes en Supabase.',
+        totalLines: 0,
+        skipped: true
+      });
+    }
+
     const result = await budgetService.loadBudget(defaultPath, sheetName);
 
     res.json({
