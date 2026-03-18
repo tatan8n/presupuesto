@@ -8,13 +8,13 @@ const router = express.Router();
 // Configurar multer para subida de archivos Excel
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
-    const isVercel = process.env.VERCEL || process.env.NOW_BUILDER;
-    const uploadsDir = isVercel 
-      ? path.join('/tmp', 'uploads') 
-      : path.join(__dirname, '..', '..', 'uploads');
+    const isVercel = process.env.VERCEL || process.env.NOW_BUILDER || process.env.NODE_ENV === 'production';
+    const uploadsDir = isVercel ? '/tmp' : path.join(__dirname, '..', '..', 'uploads');
     
-    if (!fs.existsSync(uploadsDir)) {
-      fs.mkdirSync(uploadsDir, { recursive: true });
+    if (!isVercel && !fs.existsSync(uploadsDir)) {
+      try {
+        fs.mkdirSync(uploadsDir, { recursive: true });
+      } catch (e) {}
     }
     cb(null, uploadsDir);
   },

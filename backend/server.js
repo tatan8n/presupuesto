@@ -9,16 +9,16 @@ const budgetService = require('./services/BudgetService');
 const app = express();
 
 // Configuración de directorio de uploads (Vercel usa /tmp para escritura)
-const isVercel = process.env.VERCEL || process.env.NOW_BUILDER;
+const isVercel = process.env.VERCEL || process.env.NOW_BUILDER || process.env.NODE_ENV === 'production';
 const uploadsDir = isVercel 
-  ? path.join('/tmp', 'uploads') 
+  ? '/tmp' 
   : path.join(__dirname, '..', 'uploads');
 
-if (!fs.existsSync(uploadsDir)) {
+if (!isVercel && !fs.existsSync(uploadsDir)) {
   try {
     fs.mkdirSync(uploadsDir, { recursive: true });
   } catch (err) {
-    console.warn(`⚠️ No se pudo crear el directorio de uploads: ${err.message}`);
+    console.warn(`⚠️ No se pudo crear el directorio de uploads local: ${err.message}`);
   }
 }
 
