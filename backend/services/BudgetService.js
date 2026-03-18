@@ -2,7 +2,8 @@ const { readBudgetFromExcel, writeBudgetToExcel, generateWeeklyCashFlowExcel } =
 const { fetchInvoices, fetchPurchaseOrders } = require('../repositories/dolibarrRepository');
 const { createBudgetLine, recalculateLine } = require('../models/BudgetLine');
 const { createMovement } = require('../models/Movement');
-const { v4: uuidv4 } = require('uuid');
+const crypto = require('crypto');
+const uuidv4 = () => crypto.randomUUID();
 const config = require('../config');
 const supabaseRepository = require('../repositories/supabaseRepository');
 
