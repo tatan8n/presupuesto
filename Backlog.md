@@ -1,0 +1,9 @@
+- Resize de columnas en la tabla de presupuesto
+- Filtro personalizado de checkbox si quiero ver solo gastos sin industria y comercio o son salarios o sin otros eleemntos que necesitamos para el EERR, quitando cuentas contables si le doy a un checkbox o algo asi
+- Presupuesto inicial y actual en una sola tarjeta como con un / para dividir los numeros
+- Que el filtro de escenario sea por defecto el valor Escenario 1
+- Que cuando yo le de a un mes en el grafico de barras me filtre la tabla por ese mes
+- Quitar el gráfico en el dashboard de escenario
+- Que cuando yo configure en la modal de detalle, un porcentaje en %Mat, no me lo multiplique por el total, sino que me lo deje como porcentaje de cada mes, ejemplo, si la linea de referencia tiene 100 en enero y 200 en febrero, y yo pongo que el %Mat es del 10%, entonces en enero me ponga 10 y en febrero me ponga 20
+- Que los filtros tengan el nombre, que no digan Todas por defecto, sino que sea el nombre del filtro, por ejemplo, si yo tengo un filtro de escenario, que diga Escenario 1, Escenario 2, Escenario 3, y si yo tengo un filtro de linea, que diga Linea 1, Linea 2, Linea 3, etc
+- Que el filtro de tipo costo gasto inversion ingreso no sea un filtro, sino que sea un toggle, que yo pueda ver solo gastos, o solo costos, o solo inversion, o solo ingreso, o una combinacion de ellos

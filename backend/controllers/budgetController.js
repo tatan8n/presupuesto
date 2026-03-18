@@ -1,0 +1,261 @@
+const express = require('express');
+const multer = require('multer');
+const path = require('path');
+const budgetService = require('../services/BudgetService');
+
+const router = express.Router();
+
+// Configurar multer para subida de archivos Excel
+const storage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    cb(null, path.join(__dirname, '..', '..', 'uploads'));
+  },
+  filename: (req, file, cb) => {
+    const timestamp = Date.now();
+    cb(null, `${timestamp}_${file.originalname}`);
+  },
+});
+const upload = multer({ storage });
+
+// ==========================================
+// CARGA Y DATOS
+// ==========================================
+
+/**
+ * POST /api/budget/upload
+ * Sube un archivo Excel y carga el presupuesto en la base de datos Supabase.
+ */
+router.post('/upload', upload.single('file'), async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ error: 'No se recibió ningún archivo.' });
+    }
+
+    const sheetName = req.body.sheetName || 'Detalle';
+    const result = await budgetService.loadBudget(req.file.path, sheetName);
+
+    res.json({
+      message: `Presupuesto cargado exitosamente en Supabase: ${result.totalLines} líneas.`,
+      ...result,
+    });
+  } catch (error) {
+    console.error('Error al cargar presupuesto:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+/**
+ * POST /api/budget/load-default
+ * Carga el archivo Excel por defecto en la base de datos Supabase.
+ */
+router.post('/load-default', async (req, res) => {
+  try {
+    const defaultPath = (req.body && req.body.filePath) ? req.body.filePath : path.join(
+      __dirname, '..', '..', 'Presupuesto general A-MAQ 2026 Rev 13-01-25 - 7300.xlsx'
+    );
+    const sheetName = (req.body && req.body.sheetName) ? req.body.sheetName : 'Detalle';
+    const result = await budgetService.loadBudget(defaultPath, sheetName);
+
+    res.json({
+      message: `Presupuesto base cargado: ${result.totalLines} líneas.`,
+      ...result,
+    });
+  } catch (error) {
+    console.error('Error al cargar presupuesto por defecto:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ==========================================
+// KPIs E INDICADORES
+// ==========================================
+
+/**
+ * GET /api/budget/kpis
+ * Obtiene KPIs globales con filtros opcionales de Supabase.
+ */
+router.get('/kpis', async (req, res) => {
+  try {
+    const kpis = await budgetService.getKPIs(req.query);
+    res.json(kpis);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+/**
+ * GET /api/budget/monthly
+ * Datos mensuales para gráficos.
+ */
+router.get('/monthly', async (req, res) => {
+  try {
+    const data = await budgetService.getMonthlyData(req.query);
+    res.json(data);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+/**
+ * GET /api/budget/weekly-flow
+ * Flujo semanal estimado.
+ */
+router.get('/weekly-flow', async (req, res) => {
+  try {
+    const data = await budgetService.getWeeklyFlow(req.query);
+    res.json(data);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+/**
+ * GET /api/budget/filters
+ * Opciones de filtros disponibles.
+ */
+router.get('/filters', async (req, res) => {
+  try {
+    const options = await budgetService.getFilterOptions();
+    res.json(options);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ==========================================
+// CRUD DE LÍNEAS
+// ==========================================
+
+/**
+ * GET /api/budget
+ * Lista líneas de presupuesto con filtros.
+ */
+router.get('/', async (req, res) => {
+  try {
+    const lines = await budgetService.getBudgetLines(req.query);
+    res.json(lines);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+/**
+ * GET /api/budget/:id
+ * Obtiene una línea por ID.
+ */
+router.get('/:id', async (req, res) => {
+  try {
+    const line = await budgetService.getBudgetLineById(req.params.id);
+    if (!line) return res.status(404).json({ error: 'Línea no encontrada.' });
+    res.json(line);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+/**
+ * POST /api/budget
+ * Crea una nueva línea.
+ */
+router.post('/', async (req, res) => {
+  try {
+    const line = await budgetService.createLine(req.body);
+    res.status(201).json(line);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+/**
+ * PUT /api/budget/:id
+ * Actualiza una línea existente.
+ */
+router.put('/:id', async (req, res) => {
+  try {
+    const line = await budgetService.updateLine(req.params.id, req.body);
+    res.json(line);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+/**
+ * DELETE /api/budget/:id
+ * Elimina una línea (lógica por defecto, física si ?physical=true).
+ */
+router.delete('/:id', async (req, res) => {
+  try {
+    const physical = req.query.physical === 'true';
+    const result = await budgetService.deleteLine(req.params.id, physical);
+    res.json(result);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ==========================================
+// GUARDAR Y SINCRONIZAR
+// ==========================================
+
+/**
+ * POST /api/budget/save-excel
+ * Guarda los datos actuales de Supabase en un archivo Excel.
+ */
+router.post('/save-excel', async (req, res) => {
+  try {
+    const defaultPath = req.body.filePath || path.join(__dirname, '..', '..', 'Presupuesto general A-MAQ 2026 Rev 13-01-25 - 7300.xlsx');
+    const result = await budgetService.saveToExcel(defaultPath, req.body.sheetName || 'Detalle');
+    res.json({
+      message: `Archivo exportado/guardado satisfactoriamente. Backup en: ${result.backupPath}`,
+      ...result,
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+/**
+ * GET /api/budget/export-weekly
+ * Descarga el flujo de caja en formato de 52 semanas
+ */
+router.get('/export-weekly', async (req, res) => {
+  try {
+    const buffer = await budgetService.exportWeeklyExcel(req.query);
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', 'attachment; filename=FlujoSemanal.xlsx');
+    res.send(buffer);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+/**
+ * POST /api/budget/sync-dolibarr
+ * Sincroniza movimientos desde Dolibarr.
+ */
+router.post('/sync-dolibarr', async (req, res) => {
+  try {
+    const dolibarrConfig = req.body.dolibarrConfig || null;
+    const result = await budgetService.syncDolibarr(dolibarrConfig);
+    res.json({
+      message: 'Sincronización completada.',
+      ...result,
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+/**
+ * GET /api/budget/sync-log
+ * Historial de sincronizaciones.
+ */
+router.get('/config/sync-log', async (req, res) => {
+  try {
+    res.json(await budgetService.getSyncLog());
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+module.exports = router;
