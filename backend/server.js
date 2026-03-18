@@ -32,27 +32,33 @@ app.use('/api/budget', budgetRoutes);
 
 // Ruta de salud
 app.get('/api/health', (req, res) => {
-  res.json({ status: 'ok', timestamp: new Date().toISOString() });
+  res.json({ 
+    status: 'ok', 
+    timestamp: new Date().toISOString(),
+    env: process.env.NODE_ENV,
+    isVercel: !!process.env.VERCEL
+  });
 });
 
-// Servir frontend estático en producción
-const frontendBuild = path.join(__dirname, '..', 'frontend', 'dist');
-if (fs.existsSync(frontendBuild)) {
-  app.use(express.static(frontendBuild));
-  // En Express 5, el comodín '*' debe ser '(.*)'
-  app.get('(.*)', (req, res) => {
-    if (!req.path.startsWith('/api')) {
-      res.sendFile(path.join(frontendBuild, 'index.html'));
-    }
-  });
+// Servir frontend estático SOLO en desarrollo local
+// En Vercel, esto es gestionado por el capa estática (vercel.json rewrites)
+if (!isVercel) {
+  const frontendBuild = path.join(__dirname, '..', 'frontend', 'dist');
+  if (fs.existsSync(frontendBuild)) {
+    app.use(express.static(frontendBuild));
+    app.get('*', (req, res) => {
+      if (!req.path.startsWith('/api')) {
+        res.sendFile(path.join(frontendBuild, 'index.html'));
+      }
+    });
+  }
 }
 
 // Iniciar servidor solo si no estamos en Vercel
-if (process.env.NODE_ENV !== 'production' || !process.env.VERCEL) {
+if (!isVercel) {
   const PORT = config.port || 3001;
   app.listen(PORT, () => {
     console.log(`🚀 Servidor de presupuesto ejecutándose en http://localhost:${PORT}`);
-    console.log(`📊 API disponible en http://localhost:${PORT}/api/budget`);
   });
 }
 
