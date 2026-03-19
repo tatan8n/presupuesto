@@ -3,7 +3,7 @@ import { LayoutDashboard, Table2, CalendarDays, Settings, Upload, RefreshCw } fr
 const navItems = [
   { key: 'dashboard', label: 'Dashboard', icon: LayoutDashboard, section: 'Principal' },
   { key: 'detalle', label: 'Detalle Presupuesto', icon: Table2, section: 'Principal' },
-  { key: 'semanal', label: 'Flujo Semanal', icon: CalendarDays, section: 'Análisis' },
+  { key: 'semanal', label: 'Flujo Semanal', icon: CalendarDays, section: 'Principal' },
   { key: 'importar', label: 'Importar Excel', icon: Upload, section: 'Datos' },
   { key: 'dolibarr', label: 'Sincronizar Dolibarr', icon: RefreshCw, section: 'Datos' },
   { key: 'configuracion', label: 'Configuración', icon: Settings, section: 'Sistema' },

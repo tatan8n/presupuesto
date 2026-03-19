@@ -73,11 +73,13 @@ function writeBudgetToExcel(filePath, sheetName, lines) {
  * @returns {string[]}
  */
 /**
- * Genera un archivo Excel de flujo de caja semanal en memoria y retorna el buffer.
+ * Genera un archivo Excel de flujo de caja semanal simplificado.
  * @param {Array} lines - Array de líneas de presupuesto.
+ * @param {Object} options - Opciones de exportación (startWeek, endWeek, simplified).
  * @returns {Buffer}
  */
-function generateWeeklyCashFlowExcel(lines) {
+function generateWeeklyCashFlowExcel(lines, options = {}) {
+  const { startWeek = 1, endWeek = 52, simplified = true } = options;
   const MONTH_KEYS = [
     'enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio',
     'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'
@@ -86,15 +88,18 @@ function generateWeeklyCashFlowExcel(lines) {
   const excelRows = lines.filter(l => l.estado === 'activa').map(line => {
     const row = {
       'Área': line.area,
-      'Línea': line.linea,
-      'Escenario': line.escenario,
-      'Tipo (ICGI)': line.icgi,
-      'Cuenta Contable': line.cuentaContable,
-      'Número de cuenta': line.cuenta,
-      'Fecha': line.fecha || '',
+      'Nombre del elemento': line.nombreElemento,
     };
 
-    // Calculate weekly distribution for this line
+    if (!simplified) {
+      row['Línea'] = line.linea;
+      row['Escenario'] = line.escenario;
+      row['Tipo (ICGI)'] = line.icgi;
+      row['Cuenta Contable'] = line.cuentaContable;
+      row['Número de cuenta'] = line.cuenta;
+    }
+
+    // Calculate weekly distribution
     const weeks = Array(52).fill(0);
     MONTH_KEYS.forEach((month, monthIndex) => {
       const amount = line[month] || 0;
@@ -102,7 +107,7 @@ function generateWeeklyCashFlowExcel(lines) {
 
       let weekNumber;
       if (line.fecha && typeof line.fecha === 'number') {
-        const date = new Date((line.fecha - 25569) * 86400 * 1000); // Excel date to JS date
+        const date = new Date((line.fecha - 25569) * 86400 * 1000);
         const startOfYear = new Date(date.getFullYear(), 0, 1);
         const diff = date - startOfYear;
         weekNumber = Math.floor(diff / (7 * 24 * 60 * 60 * 1000));
@@ -113,32 +118,37 @@ function generateWeeklyCashFlowExcel(lines) {
         weekNumber = Math.floor(diff / (7 * 24 * 60 * 60 * 1000));
       }
 
-      weekNumber = Math.max(0, Math.min(51, weekNumber)); // 0-indexed
+      weekNumber = Math.max(0, Math.min(51, weekNumber));
       weeks[weekNumber] += amount;
     });
 
-    weeks.forEach((amount, index) => {
-      row[`Semana ${index + 1}`] = amount;
-    });
+    // Only add requested weeks
+    for (let i = startWeek - 1; i < endWeek; i++) {
+      row[`Semana ${i + 1}`] = weeks[i] || 0;
+    }
 
-    row['Total Flujo'] = line.total;
+    if (!simplified) {
+      row['Total Flujo'] = line.total;
+    }
 
     return row;
   });
 
   const workbook = XLSX.utils.book_new();
   const worksheet = XLSX.utils.json_to_sheet(excelRows);
-  XLSX.utils.book_append_sheet(workbook, worksheet, 'Flujo de Caja Semanal');
+  XLSX.utils.book_append_sheet(workbook, worksheet, 'Flujo Semanal');
 
-  // Format header row style if possible or just adjust column widths
+  // Adjust column widths
   const colWidths = [
-    { wch: 20 }, { wch: 20 }, { wch: 10 }, { wch: 15 }, { wch: 20 }, { wch: 15 }, { wch: 15 }
+    { wch: 15 }, // Área
+    { wch: 35 }, // Nombre
   ];
-  // add 52 columns for weeks
-  for (let i = 0; i < 52; i++) {
-    colWidths.push({ wch: 15 });
+  if (!simplified) {
+    colWidths.push({ wch: 20 }, { wch: 10 }, { wch: 15 }, { wch: 20 }, { wch: 15 });
   }
-  colWidths.push({ wch: 18 }); // Total
+  for (let i = startWeek - 1; i < endWeek; i++) {
+    colWidths.push({ wch: 12 });
+  }
   worksheet['!cols'] = colWidths;
 
   return XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx' });

@@ -160,6 +160,21 @@ async function getBudgetLines(filters = {}) {
     );
   }
 
+  if (filters.filterEERR === 'true' || filters.filterEERR === true) {
+    result = result.filter(line => {
+      const isIngreso = (line.cuenta || '').startsWith('01');
+      const cc = (line.cuentaContable || '').toLowerCase();
+      const isComision = cc.includes('comision') || cc.includes('bonificacion');
+      const isICA = cc.includes('industria y comercio');
+      const isMateriales = cc.includes('compra implemento');
+      
+      const isCatchAll = !isIngreso && !isComision && !isICA && !isMateriales;
+      const isSalary = cc.includes('salario') || cc.includes('sueldo');
+      
+      return isCatchAll && !isSalary;
+    });
+  }
+
   return result;
 }
 
@@ -310,11 +325,11 @@ async function saveToExcel(filePath, sheetName = 'Detalle') {
 }
 
 /**
- * Exporta el reporte semanal en formato binario.
+ * Exporta el reporte semanal en formato binario con opciones de filtrado.
  */
-async function exportWeeklyExcel(filters = {}) {
+async function exportWeeklyExcel(filters = {}, options = {}) {
   const lines = await getBudgetLines(filters);
-  return generateWeeklyCashFlowExcel(lines);
+  return generateWeeklyCashFlowExcel(lines, options);
 }
 
 /**

@@ -11,14 +11,15 @@ import BudgetForm from './components/BudgetForm';
 import FileUpload from './components/FileUpload';
 import WeeklyFlowChart from './components/WeeklyFlowChart';
 import DolibarrConfig from './components/DolibarrConfig';
-import MultiSelect from './components/MultiSelect';
 import ICGIToggle from './components/ICGIToggle';
+import BudgetFilters from './components/BudgetFilters';
 import {
   loadDefaultBudget, uploadExcel, getKPIs, getMonthlyData,
   getWeeklyFlow, getFilterOptions, getBudgetLines,
   createBudgetLine, updateBudgetLine, deleteBudgetLine,
   exportWeeklyExcel, syncDolibarr
 } from './services/api';
+import { getCurrentWeek } from './utils/dateUtils';
 import { Save, RefreshCw, Settings } from 'lucide-react';
 
 function App() {
@@ -31,12 +32,12 @@ function App() {
   const [allBudgetLines, setAllBudgetLines] = useState([]);
   const [eerrLines, setEerrLines] = useState([]);
   const [filters, setFilters] = useState({ escenario: [1] });
-  const [weeklyFilters, setWeeklyFilters] = useState({});
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
   const [editingLine, setEditingLine] = useState(null);
   const [notification, setNotification] = useState(null);
   const [isProcessing, setIsProcessing] = useState(false);
+  const [weeklyOptions, setWeeklyOptions] = useState({ displayWeeks: 12, filterEERR: false });
 
   // Efecto para el cursor de carga global
   useEffect(() => {
@@ -157,12 +158,12 @@ function App() {
     }
   }, [filters.escenario, loading, loadEerrLines]);
 
-  // Cargar flujo semanal cuando se accede a esa vista
+  // Cargar flujo semanal cuando se accede a esa vista o cambian filtros
   useEffect(() => {
-    if (currentView === 'semanal') {
-      loadWeekly(weeklyFilters);
+    if (currentView === 'semanal' && !loading) {
+      loadWeekly(filters);
     }
-  }, [currentView, weeklyFilters, loadWeekly]);
+  }, [currentView, filters, loading, loadWeekly]);
 
   const handleFilterChange = (newFilters) => {
     setFilters(newFilters);
@@ -287,7 +288,21 @@ function App() {
     setIsProcessing(true);
     try {
       showNotification('Generando Excel, por favor espera...', 'success');
-      await exportWeeklyExcel(filters);
+      const startWeek = getCurrentWeek();
+      const exportFilters = { ...filters };
+      
+      // Si el filtro EERR está activo, tenemos que emular su comportamiento para el backend
+      // o pasar una bandera para que el backend lo sepa.
+      // Dado que el backend ya tiene getBudgetLines, podemos pasarle los parámetros.
+      
+      const options = {
+        startWeek: startWeek,
+        endWeek: Math.min(52, startWeek + weeklyOptions.displayWeeks - 1),
+        simplified: true,
+        filterEERR: weeklyOptions.filterEERR // Necesitaremos manejar esto en el backend si queremos filtrar ahí
+      };
+      
+      await exportWeeklyExcel({ ...exportFilters, ...options });
       showNotification('Archivo exportado correctamente.');
     } catch (err) {
       showNotification(err.message, 'error');
@@ -397,8 +412,6 @@ function App() {
           <BudgetTable
             lines={budgetLines}
             filters={filters}
-            filterOptions={filterOptions}
-            onFilterChange={handleFilterChange}
             onEdit={handleEdit}
             onDelete={handleDelete}
             onCreate={handleCreate}
@@ -408,10 +421,11 @@ function App() {
       case 'semanal':
         return (
           <WeeklyFlowChart
-            data={weeklyData}
-            filters={weeklyFilters}
-            filterOptions={filterOptions}
-            onFilterChange={setWeeklyFilters}
+            allLines={allBudgetLines}
+            filters={filters}
+            options={weeklyOptions}
+            onOptionsChange={setWeeklyOptions}
+            onEdit={handleEdit}
           />
         );
 
@@ -469,9 +483,11 @@ function App() {
             <button className="btn btn-outline btn-sm" onClick={handleRefresh}>
               <RefreshCw style={{ width: 14, height: 14 }} /> Actualizar
             </button>
-            <button className="btn btn-success btn-sm" onClick={handleExportWeekly}>
-              <Save style={{ width: 14, height: 14 }} /> Exportar Flujo Semanal
-            </button>
+            {currentView === 'semanal' && (
+              <button className="btn btn-success btn-sm" onClick={handleExportWeekly}>
+                <Save style={{ width: 14, height: 14 }} /> Exportar Flujo Semanal
+              </button>
+            )}
           </div>
         </header>
 
@@ -484,57 +500,13 @@ function App() {
             </div>
           )}
 
-          {/* Filtros globales para dashboard */}
-          {currentView === 'dashboard' && (
-            <div className="filters-bar">
-              <MultiSelect
-                id="global-filter-area"
-                label="Área"
-                options={filterOptions?.areas || []}
-                value={Array.isArray(filters.area) ? filters.area : (filters.area ? filters.area.split(',') : [])}
-                onChange={(val) => handleFilterChange({ ...filters, area: val })}
-                placeholder="Todas las Áreas"
-              />
-
-              <MultiSelect
-                id="global-filter-linea"
-                label="Línea"
-                options={filterOptions?.lineas || []}
-                value={Array.isArray(filters.linea) ? filters.linea : (filters.linea ? filters.linea.split(',') : [])}
-                onChange={(val) => handleFilterChange({ ...filters, linea: val })}
-                placeholder="Todas las Líneas"
-              />
-
-              <MultiSelect
-                id="global-filter-escenario"
-                label="Escenario"
-                options={filterOptions?.escenarios || []}
-                value={Array.isArray(filters.escenario) ? filters.escenario : (filters.escenario ? filters.escenario.split(',').map(Number) : [])}
-                onChange={(val) => handleFilterChange({ ...filters, escenario: val })}
-                placeholder="Todos los Escenarios"
-              />
-
-              <ICGIToggle
-                options={filterOptions?.tipos || []}
-                value={Array.isArray(filters.icgi) ? filters.icgi : (filters.icgi ? filters.icgi.split(',') : [])}
-                onChange={(val) => handleFilterChange({ ...filters, icgi: val })}
-              />
-
-              <MultiSelect
-                id="global-filter-cuenta-contable"
-                label="Cuenta Contable"
-                options={filterOptions?.cuentasContables || []}
-                value={Array.isArray(filters.cuentaContable) ? filters.cuentaContable : (filters.cuentaContable ? filters.cuentaContable.split(',') : [])}
-                onChange={(val) => handleFilterChange({ ...filters, cuentaContable: val })}
-                placeholder="Todas las Cuentas"
-              />
-
-              {Object.values(filters).some(v => Array.isArray(v) ? v.length > 0 : Boolean(v)) && (
-                <button className="btn btn-ghost btn-sm" onClick={() => setFilters({})}>
-                  Limpiar filtros
-                </button>
-              )}
-            </div>
+          {/* Filtros globales para vistas de datos */}
+          {['dashboard', 'detalle', 'semanal'].includes(currentView) && (
+            <BudgetFilters 
+              filters={filters} 
+              filterOptions={filterOptions} 
+              onFilterChange={handleFilterChange} 
+            />
           )}
 
           {renderView()}

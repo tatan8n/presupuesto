@@ -1,8 +1,10 @@
 const express = require('express');
 const multer = require('multer');
 const path = require('path');
+const fs = require('fs');
 const budgetService = require('../services/BudgetService');
 
+console.log('✅ budgetController.js loaded');
 const router = express.Router();
 
 // Configurar multer para subida de archivos Excel
@@ -160,6 +162,27 @@ router.get('/', async (req, res) => {
 });
 
 /**
+ * GET /api/budget/export-weekly
+ * Descarga el flujo de caja en formato de 52 semanas (con opciones de recorte)
+ */
+router.get('/export-weekly', async (req, res) => {
+  try {
+    const { startWeek, endWeek, simplified, ...filters } = req.query;
+    const options = {
+      startWeek: parseInt(startWeek) || 1,
+      endWeek: parseInt(endWeek) || 52,
+      simplified: simplified !== 'false'
+    };
+    const buffer = await budgetService.exportWeeklyExcel(filters, options);
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', 'attachment; filename=FlujoSemanal.xlsx');
+    res.send(buffer);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+/**
  * GET /api/budget/:id
  * Obtiene una línea por ID.
  */
@@ -234,20 +257,7 @@ router.post('/save-excel', async (req, res) => {
   }
 });
 
-/**
- * GET /api/budget/export-weekly
- * Descarga el flujo de caja en formato de 52 semanas
- */
-router.get('/export-weekly', async (req, res) => {
-  try {
-    const buffer = await budgetService.exportWeeklyExcel(req.query);
-    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-    res.setHeader('Content-Disposition', 'attachment; filename=FlujoSemanal.xlsx');
-    res.send(buffer);
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
+
 
 /**
  * POST /api/budget/sync-dolibarr

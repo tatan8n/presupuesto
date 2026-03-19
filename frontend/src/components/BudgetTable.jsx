@@ -4,8 +4,7 @@ import { formatCurrencyFull, formatPercentage } from '../utils/formatters';
 import MultiSelect from './MultiSelect';
 import ICGIToggle from './ICGIToggle';
 
-export default function BudgetTable({ lines, filters, filterOptions, onFilterChange, onEdit, onDelete, onCreate }) {
-  const [search, setSearch] = useState('');
+export default function BudgetTable({ lines, filters, onEdit, onDelete, onCreate }) {
   const [currentPage, setCurrentPage] = useState(1);
   const [itemsPerPage, setItemsPerPage] = useState(10);
 
@@ -22,12 +21,6 @@ export default function BudgetTable({ lines, filters, filterOptions, onFilterCha
       setCurrentPage(1);
     }
   }, [lines, itemsPerPage, currentPage]);
-
-  const handleSearch = (e) => {
-    setSearch(e.target.value);
-    onFilterChange({ ...filters, search: e.target.value });
-    setCurrentPage(1);
-  };
 
   const totalPages = Math.ceil(lines.length / itemsPerPage) || 1;
   const startIndex = (currentPage - 1) * itemsPerPage;
@@ -49,18 +42,6 @@ export default function BudgetTable({ lines, filters, filterOptions, onFilterCha
           </span>
         </div>
         <div className="table-actions">
-          <div style={{ position: 'relative' }}>
-            <Search style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', width: 16, height: 16, color: 'var(--text-muted)' }} />
-            <input
-              type="text"
-              className="filter-input"
-              placeholder="Buscar por nombre, cuenta..."
-              value={search}
-              onChange={handleSearch}
-              style={{ paddingLeft: 32 }}
-              id="search-budget"
-            />
-          </div>
           <button className="btn btn-primary" onClick={onCreate} id="btn-create-line">
             <Plus /> Nueva Línea
           </button>
@@ -82,50 +63,6 @@ export default function BudgetTable({ lines, filters, filterOptions, onFilterCha
         </div>
       )}
 
-      {/* Filtros */}
-      <div style={{ padding: '12px 20px', borderBottom: '1px solid var(--border-light)', display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-        <MultiSelect
-          id="filter-area"
-          label="Área"
-          options={filterOptions?.areas || []}
-          value={Array.isArray(filters.area) ? filters.area : (filters.area ? filters.area.split(',') : [])}
-          onChange={(val) => onFilterChange({ ...filters, area: val })}
-          placeholder="Todas las Áreas"
-        />
-
-        <MultiSelect
-          id="filter-linea"
-          label="Línea"
-          options={filterOptions?.lineas || []}
-          value={Array.isArray(filters.linea) ? filters.linea : (filters.linea ? filters.linea.split(',') : [])}
-          onChange={(val) => onFilterChange({ ...filters, linea: val })}
-          placeholder="Todas las Líneas"
-        />
-
-        <MultiSelect
-          id="filter-escenario"
-          label="Escenario"
-          options={filterOptions?.escenarios || []}
-          value={Array.isArray(filters.escenario) ? filters.escenario : (filters.escenario ? filters.escenario.split(',').map(Number) : [])}
-          onChange={(val) => onFilterChange({ ...filters, escenario: val })}
-          placeholder="Todos los Escenarios"
-        />
-
-        <ICGIToggle
-          options={filterOptions?.tipos || []}
-          value={Array.isArray(filters.icgi) ? filters.icgi : (filters.icgi ? filters.icgi.split(',') : [])}
-          onChange={(val) => onFilterChange({ ...filters, icgi: val })}
-        />
-
-        <MultiSelect
-          id="filter-cuenta-contable"
-          label="Cuenta Contable"
-          options={filterOptions?.cuentasContables || []}
-          value={Array.isArray(filters.cuentaContable) ? filters.cuentaContable : (filters.cuentaContable ? filters.cuentaContable.split(',') : [])}
-          onChange={(val) => onFilterChange({ ...filters, cuentaContable: val })}
-          placeholder="Todas las Cuentas"
-        />
-      </div>
 
       {/* Tabla */}
       <div className="table-wrapper">
