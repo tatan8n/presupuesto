@@ -2,6 +2,7 @@ const XLSX = require('xlsx');
 const fs = require('fs');
 const path = require('path');
 const { createBudgetLine, budgetLineToExcelRow } = require('../models/BudgetLine');
+const { getCurrentWeek } = require('../utils/dateUtils');
 
 /**
  * Lee el presupuesto desde un archivo Excel.
@@ -99,23 +100,46 @@ function generateWeeklyCashFlowExcel(lines, options = {}) {
       row['Número de cuenta'] = line.cuenta;
     }
 
-    // Calculate weekly distribution
     const weeks = Array(52).fill(0);
-    MONTH_KEYS.forEach((month, monthIndex) => {
-      const amount = line[month] || 0;
+    const MONTH_FIELDS = [
+      { key: 'enero', dateKey: 'fechaEnero' },
+      { key: 'febrero', dateKey: 'fechaFebrero' },
+      { key: 'marzo', dateKey: 'fechaMarzo' },
+      { key: 'abril', dateKey: 'fechaAbril' },
+      { key: 'mayo', dateKey: 'fechaMayo' },
+      { key: 'junio', dateKey: 'fechaJunio' },
+      { key: 'julio', dateKey: 'fechaJulio' },
+      { key: 'agosto', dateKey: 'fechaAgosto' },
+      { key: 'septiembre', dateKey: 'fechaSeptiembre' },
+      { key: 'octubre', dateKey: 'fechaOctubre' },
+      { key: 'noviembre', dateKey: 'fechaNoviembre' },
+      { key: 'diciembre', dateKey: 'fechaDiciembre' },
+    ];
+
+    MONTH_FIELDS.forEach((m, monthIndex) => {
+      const amount = line[m.key] || 0;
       if (amount === 0) return;
 
       let weekNumber;
-      if (line.fecha && typeof line.fecha === 'number') {
+      if (line[m.dateKey]) {
+        const day = parseInt(line[m.dateKey]);
+        const date = new Date(2026, monthIndex, day);
+        weekNumber = getCurrentWeek(date) - 1;
+      } 
+      else if (line.fecha && typeof line.fecha === 'number') {
         const date = new Date((line.fecha - 25569) * 86400 * 1000);
-        const startOfYear = new Date(date.getFullYear(), 0, 1);
-        const diff = date - startOfYear;
-        weekNumber = Math.floor(diff / (7 * 24 * 60 * 60 * 1000));
-      } else {
-        const lastDay = new Date(2026, monthIndex + 1, 0);
-        const startOfYear = new Date(2026, 0, 1);
-        const diff = lastDay - startOfYear;
-        weekNumber = Math.floor(diff / (7 * 24 * 60 * 60 * 1000));
+        if (date.getMonth() === monthIndex) {
+          weekNumber = getCurrentWeek(date) - 1;
+        } else {
+          const lastDay = new Date(2026, monthIndex + 1, 0).getDate();
+          const defaultDate = new Date(2026, monthIndex, lastDay);
+          weekNumber = getCurrentWeek(defaultDate) - 1;
+        }
+      } 
+      else {
+        const lastDay = new Date(2026, monthIndex + 1, 0).getDate();
+        const defaultDate = new Date(2026, monthIndex, lastDay);
+        weekNumber = getCurrentWeek(defaultDate) - 1;
       }
 
       weekNumber = Math.max(0, Math.min(51, weekNumber));

@@ -288,21 +288,18 @@ function App() {
     setIsProcessing(true);
     try {
       showNotification('Generando Excel, por favor espera...', 'success');
-      const startWeek = getCurrentWeek();
-      const exportFilters = { ...filters };
       
-      // Si el filtro EERR está activo, tenemos que emular su comportamiento para el backend
-      // o pasar una bandera para que el backend lo sepa.
-      // Dado que el backend ya tiene getBudgetLines, podemos pasarle los parámetros.
+      const currentWeek = getCurrentWeek();
+      const effectiveStartWeek = weeklyOptions.startWeek === 'current' ? currentWeek : parseInt(weeklyOptions.startWeek);
       
       const options = {
-        startWeek: startWeek,
-        endWeek: Math.min(52, startWeek + weeklyOptions.displayWeeks - 1),
+        startWeek: effectiveStartWeek,
+        endWeek: Math.min(52, effectiveStartWeek + weeklyOptions.displayWeeks - 1),
         simplified: true,
-        filterEERR: weeklyOptions.filterEERR // Necesitaremos manejar esto en el backend si queremos filtrar ahí
+        filterEERR: weeklyOptions.filterEERR
       };
       
-      await exportWeeklyExcel({ ...exportFilters, ...options });
+      await exportWeeklyExcel({ ...filters, ...options });
       showNotification('Archivo exportado correctamente.');
     } catch (err) {
       showNotification(err.message, 'error');

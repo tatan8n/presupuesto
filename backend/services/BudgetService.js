@@ -164,14 +164,9 @@ async function getBudgetLines(filters = {}) {
     result = result.filter(line => {
       const isIngreso = (line.cuenta || '').startsWith('01');
       const cc = (line.cuentaContable || '').toLowerCase();
-      const isComision = cc.includes('comision') || cc.includes('bonificacion');
-      const isICA = cc.includes('industria y comercio');
-      const isMateriales = cc.includes('compra implemento');
-      
-      const isCatchAll = !isIngreso && !isComision && !isICA && !isMateriales;
       const isSalary = cc.includes('salario') || cc.includes('sueldo');
-      
-      return isCatchAll && !isSalary;
+      const isExtra = cc.includes('comision') || cc.includes('bonificacion') || cc.includes('industria y comercio') || cc.includes('compra implemento');
+      return !isIngreso && !isSalary && !isExtra;
     });
   }
 
