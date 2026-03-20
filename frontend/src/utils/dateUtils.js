@@ -72,3 +72,73 @@ export function getCurrentWeek(date = new Date()) {
   // Semana 2 empieza en día 4 (Lunes 5 de enero)
   return Math.floor((diffInDays - 4) / 7) + 2;
 }
+
+/**
+ * Obtiene todas las semanas que tienen al menos un día en el mes especificado.
+ * @param {number} monthIndex - Índice del mes (0-11).
+ * @param {number} year - Año (por defecto 2026).
+ * @returns {Array} Colección de objetos { value: weekNo, label: "Semana X - del ..." }
+ */
+export function getWeeksInMonth(monthIndex, year = 2026) {
+  const weeks = [];
+  const firstDayOfMonth = new Date(year, monthIndex, 1);
+  const lastDayOfMonth = new Date(year, monthIndex + 1, 0);
+  
+  const startWeek = getCurrentWeek(firstDayOfMonth);
+  const endWeek = getCurrentWeek(lastDayOfMonth);
+  
+  for (let w = startWeek; w <= endWeek; w++) {
+    weeks.push({
+      value: w.toString(),
+      label: `Semana ${w} - ${getWeekRange(w)}`
+    });
+  }
+  
+  return weeks;
+}
+
+/**
+ * Obtiene el número de semana para un día específico de un mes.
+ * @param {number|string} day - Día del mes.
+ * @param {number} monthIndex - Mes (0-11).
+ * @returns {number} Número de semana.
+ */
+export function getWeekForDay(day, monthIndex) {
+  if (!day) return getCurrentWeek(new Date(2026, monthIndex, 1));
+  const date = new Date(2026, monthIndex, parseInt(day));
+  return getCurrentWeek(date);
+}
+
+/**
+ * Obtiene un día representativo (el primero disponible) de una semana dentro de un mes.
+ * @param {number|string} weekNo - Número de semana.
+ * @param {number} monthIndex - Mes (0-11).
+ * @returns {string} Día del mes como string.
+ */
+export function getRepresentativeDayInWeek(weekNo, monthIndex) {
+  const year = 2026;
+  const targetWeek = parseInt(weekNo);
+  
+  // Buscamos el primer día de esa semana que caiga en el mes solicitado
+  // O el primer día de la semana si el mes no importa (pero aquí sí importa para guardar en la columna correcta)
+  
+  let date;
+  if (targetWeek === 1) {
+    date = new Date(year, 0, 1);
+  } else {
+    const firstMonday = new Date(year, 0, 5);
+    date = new Date(firstMonday);
+    date.setDate(firstMonday.getDate() + (targetWeek - 2) * 7);
+  }
+  
+  // Si la semana empieza antes del mes, usamos el día 1 del mes
+  if (date.getMonth() < monthIndex && date.getFullYear() <= year) {
+    return "1";
+  }
+  // Si la semana empieza después del mes (no debería pasar con getWeeksInMonth), usamos el último día
+  if (date.getMonth() > monthIndex || date.getFullYear() > year) {
+    return new Date(year, monthIndex + 1, 0).getDate().toString();
+  }
+  
+  return date.getDate().toString();
+}

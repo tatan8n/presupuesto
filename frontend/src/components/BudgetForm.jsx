@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useMemo } from 'react';
 import { X, Copy, Search, Eraser, Calculator, Check } from 'lucide-react';
 import CurrencyInput from './CurrencyInput';
+import { getWeeksInMonth, getWeekForDay, getRepresentativeDayInWeek } from '../utils/dateUtils';
 
 const MONTH_FIELDS = [
   { key: 'enero', dateKey: 'fechaEnero', lineaKey: 'lineaEnero', label: 'Enero' },
@@ -53,7 +54,7 @@ export default function BudgetForm({ line, filterOptions, budgetLines, onSave, o
   const [isBaseLineDropdownOpen, setIsBaseLineDropdownOpen] = useState(false);
   const [annualInitialInput, setAnnualInitialInput] = useState('');
   const [annualCurrentInput, setAnnualCurrentInput] = useState('');
-  const [dayInputText, setDayInputText] = useState('');
+  const [weekInputText, setWeekInputText] = useState('');
   const baseLineDropdownRef = useRef(null);
   const isEditing = !!line;
 
@@ -178,18 +179,18 @@ export default function BudgetForm({ line, filterOptions, budgetLines, onSave, o
     setAnnualCurrentInput('');
   };
 
-  const handleDistributeDay = () => {
-    const dayVal = parseInt(dayInputText);
-    if (isNaN(dayVal) || dayVal < 1) return;
+  const handleDistributeWeek = () => {
+    const weekVal = parseInt(weekInputText);
+    if (isNaN(weekVal) || weekVal < 1 || weekVal > 53) return;
     
     setForm(prev => {
       const updated = { ...prev };
-      MONTH_FIELDS.forEach(m => {
-        updated[m.dateKey] = Math.min(dayVal, getMaxDays(m.key)).toString();
+      MONTH_FIELDS.forEach((m, idx) => {
+        updated[m.dateKey] = getRepresentativeDayInWeek(weekVal, idx);
       });
       return updated;
     });
-    setDayInputText('');
+    setWeekInputText('');
   };
 
   const handleBaseLineToggle = (lineId) => {
@@ -532,22 +533,23 @@ export default function BudgetForm({ line, filterOptions, budgetLines, onSave, o
                 </div>
 
                 <div style={{ flex: '1 1 30%', minWidth: '250px', display: 'flex', flexDirection: 'column', gap: 8, background: 'var(--bg-card)', padding: '12px', borderRadius: 4, border: '1px dashed var(--border-light)' }}>
-                  <span style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>Fijar el mismo <strong>Día</strong> para todos los meses: </span>
+                  <span style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>Fijar la misma <strong>Semana</strong> para todos los meses: </span>
                   <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
                     <input
                       className="form-input"
                       type="number"
                       min="1"
-                      placeholder="Día (ej. 15)"
-                      value={dayInputText}
-                      onChange={e => setDayInputText(e.target.value)}
+                      max="53"
+                      placeholder="Semana (1-53)"
+                      value={weekInputText}
+                      onChange={e => setWeekInputText(e.target.value)}
                     />
                     <button 
                       type="button" 
                       className="btn btn-primary btn-sm" 
-                      onClick={handleDistributeDay}
-                      title="Aplicar día a todos los meses"
-                      disabled={!dayInputText}
+                      onClick={handleDistributeWeek}
+                      title="Aplicar semana a todos los meses"
+                      disabled={!weekInputText}
                     >
                       <Copy style={{ width: 14, height: 14, marginRight: 6 }} /> Aplicar
                     </button>
@@ -562,13 +564,13 @@ export default function BudgetForm({ line, filterOptions, budgetLines, onSave, o
                   <tr>
                     <th>Mes</th>
                     <th style={{ width: '22%' }}>P. Inicial (Referencia)</th>
-                    <th style={{ width: '22%' }}>P. Actual (Modificable)</th>
-                    <th style={{ width: '15%' }}>Día Ejec.</th>
-                    <th style={{ width: '25%' }}>Línea Negocio</th>
+                    <th style={{ width: '15%' }}>P. Actual (Modificable)</th>
+                    <th style={{ width: '25%' }}>Semana Ejec.</th>
+                    <th style={{ width: '22%' }}>Línea Negocio</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {MONTH_FIELDS.map(m => {
+                  {MONTH_FIELDS.map((m, monthIndex) => {
                     const ogKey = `og${m.key.charAt(0).toUpperCase() + m.key.slice(1)}`;
                     return (
                       <tr key={m.key}>
@@ -590,27 +592,21 @@ export default function BudgetForm({ line, filterOptions, budgetLines, onSave, o
                           />
                         </td>
                         <td>
-                          <input
+                          <select
                             className="form-input"
-                            type="number"
-                            min="1"
-                            max={getMaxDays(m.key)}
-                            placeholder="15"
-                            value={form[m.dateKey]}
+                            value={getWeekForDay(form[m.dateKey], monthIndex)}
                             onChange={e => {
-                              let val = parseInt(e.target.value);
-                              if (e.target.value === '') {
-                                handleChange(m.dateKey, '');
-                                return;
-                              }
-                              const maxDays = getMaxDays(m.key);
-                              if (!isNaN(val) && val > maxDays) val = maxDays;
-                              if (!isNaN(val) && val < 1) val = 1;
-                              handleChange(m.dateKey, isNaN(val) ? '' : val.toString());
+                              const weekNo = e.target.value;
+                              const day = getRepresentativeDayInWeek(weekNo, monthIndex);
+                              handleChange(m.dateKey, day);
                             }}
                             id={`input-date-${m.key}`}
-                            style={{ padding: '4px 8px' }}
-                          />
+                            style={{ padding: '4px 8px', fontSize: '0.75rem' }}
+                          >
+                            {getWeeksInMonth(monthIndex).map(w => (
+                              <option key={w.value} value={w.value}>{w.label}</option>
+                            ))}
+                          </select>
                         </td>
                         <td>
                           <select
