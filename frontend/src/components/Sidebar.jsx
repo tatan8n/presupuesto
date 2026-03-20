@@ -46,7 +46,8 @@ export default function Sidebar({ currentView, onNavigate }) {
       </nav>
 
       <div className="sidebar-footer">
-        © 2026 Control Presupuestario
+        © 2026 Control Presupuestario <br />
+        <span style={{ fontSize: '0.65rem', opacity: 0.5 }}>v1.1.2-weeks</span>
       </div>
     </aside>
   );
