@@ -46,7 +46,7 @@ if (!isVercel) {
   const frontendBuild = path.join(__dirname, '..', 'frontend', 'dist');
   if (fs.existsSync(frontendBuild)) {
     app.use(express.static(frontendBuild));
-    app.get('*', (req, res) => {
+    app.get(/.*/, (req, res) => {
       if (!req.path.startsWith('/api')) {
         res.sendFile(path.join(frontendBuild, 'index.html'));
       }

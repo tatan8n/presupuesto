@@ -1,12 +1,29 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { RefreshCw, Save, Wifi, WifiOff, CheckCircle, AlertCircle } from 'lucide-react';
 
+const DEFAULTS = {
+  url: 'http://www.a-maqerp.com',
+  apiKey: '4739JKj46PMqPE9YXbwtn5ji6C7ZgzuK',
+  year: '2026',
+};
+
 export default function DolibarrConfig({ onSync }) {
-  const [config, setConfig] = useState({
-    url: '',
-    apiKey: '',
-    year: '2026',
+  const [config, setConfig] = useState(() => {
+    const saved = localStorage.getItem('dolibarr_config');
+    if (saved) {
+      try {
+        return { ...DEFAULTS, ...JSON.parse(saved) };
+      } catch (e) {
+        return DEFAULTS;
+      }
+    }
+    return DEFAULTS;
   });
+
+  useEffect(() => {
+    localStorage.setItem('dolibarr_config', JSON.stringify(config));
+  }, [config]);
+
   const [syncing, setSyncing] = useState(false);
   const [result, setResult] = useState(null);
   const [error, setError] = useState(null);
@@ -26,9 +43,12 @@ export default function DolibarrConfig({ onSync }) {
     setResult(null);
 
     try {
+      console.log('Syncing with config:', config);
       const res = await onSync(config);
+      console.log('Sync result:', res);
       setResult(res);
     } catch (err) {
+      console.error('Sync error:', err);
       setError(err.message || 'Error al sincronizar con Dolibarr');
     } finally {
       setSyncing(false);

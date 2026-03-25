@@ -4,9 +4,12 @@
  * @returns {Object} Movimiento normalizado.
  */
 function createMovement(data) {
+  // El usuario indica que array_options.options_ppto contiene el #ID consecutivo de la línea
+  const budgetLineId = data.array_options?.options_ppto || data.id_linea_presupuesto || '';
+  
   return {
     id_movimiento: data.id || data.ref || '',
-    id_linea_presupuesto: data.id_linea_presupuesto || data.array_options?.options_id_linea_presupuesto || '',
+    id_linea_presupuesto: budgetLineId,
     fecha_documento: data.date || data.datef || '',
     tipo_documento: data.tipo_documento || 'factura_proveedor',
     proveedor: data.socname || data.nom || '',

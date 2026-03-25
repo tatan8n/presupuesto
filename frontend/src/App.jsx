@@ -20,7 +20,7 @@ import {
   exportWeeklyExcel, syncDolibarr
 } from './services/api';
 import { getCurrentWeek } from './utils/dateUtils';
-import { Save, RefreshCw, Settings } from 'lucide-react';
+import { Save, RefreshCw, Settings, Download } from 'lucide-react';
 
 function App() {
   const [currentView, setCurrentView] = useState('dashboard');
@@ -308,6 +308,41 @@ function App() {
     }
   };
 
+  const handleExportLines = () => {
+    try {
+      if (budgetLines.length === 0) {
+        showNotification('No hay líneas para exportar', 'error');
+        return;
+      }
+      
+      const headers = ['ID', 'Nombre del Elemento', 'Total Presupuesto'];
+      const rows = budgetLines.map(line => [
+        `#${line.idConsecutivo}`,
+        line.nombreElemento,
+        line.total.toLocaleString('es-CL', { minimumFractionDigits: 0 })
+      ]);
+
+      const csvContent = [
+        headers.join(';'),
+        ...rows.map(row => row.map(cell => `"${(cell || '').replace(/"/g, '""')}"`).join(';'))
+      ].join('\n');
+
+      const blob = new Blob(['\ufeff' + csvContent], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.setAttribute('href', url);
+      link.setAttribute('download', `Presupuesto_Detalle_${new Date().toISOString().split('T')[0]}.csv`);
+      link.style.visibility = 'hidden';
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      showNotification('Líneas exportadas correctamente');
+    } catch (err) {
+      console.error(err);
+      showNotification('Error al exportar líneas', 'error');
+    }
+  };
+
   const handleSync = async (config) => {
     setIsProcessing(true);
     try {
@@ -480,6 +515,11 @@ function App() {
             <button className="btn btn-outline btn-sm" onClick={handleRefresh}>
               <RefreshCw style={{ width: 14, height: 14 }} /> Actualizar
             </button>
+            {currentView === 'detalle' && (
+              <button className="btn btn-success btn-sm" onClick={handleExportLines}>
+                <Download style={{ width: 14, height: 14 }} /> Exportar Líneas
+              </button>
+            )}
             {currentView === 'semanal' && (
               <button className="btn btn-success btn-sm" onClick={handleExportWeekly}>
                 <Save style={{ width: 14, height: 14 }} /> Exportar Flujo Semanal

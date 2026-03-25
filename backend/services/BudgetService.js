@@ -6,6 +6,7 @@ const crypto = require('crypto');
 const uuidv4 = () => crypto.randomUUID();
 const config = require('../config');
 const supabaseRepository = require('../repositories/supabaseRepository');
+const fs = require('fs');
 
 // Estado en memoria
 let movements = [];
@@ -468,57 +469,113 @@ async function getWeeklyFlow(filters = {}) {
  * Sincroniza movimientos desde Dolibarr y actualiza ejecutado en Supabase.
  */
 async function syncDolibarr(dolibarrConfig) {
-  const cfg = dolibarrConfig || config.dolibarr;
-
-  const [invoices, orders] = await Promise.all([
-    fetchInvoices(cfg),
-    fetchPurchaseOrders(cfg),
-  ]);
-
-  const newMovements = [];
-
-  invoices.forEach(inv => {
-    const mov = createMovement({ ...inv, tipo_documento: 'factura_proveedor' });
-    if (mov.id_linea_presupuesto) newMovements.push(mov);
-  });
-
-  orders.forEach(ord => {
-    const mov = createMovement({ ...ord, tipo_documento: 'orden_compra' });
-    if (mov.id_linea_presupuesto) newMovements.push(mov);
-  });
-
-  movements = newMovements;
-
-  const ejecutadoPorLinea = {};
-  movements.forEach(m => {
-    if (!ejecutadoPorLinea[m.id_linea_presupuesto]) ejecutadoPorLinea[m.id_linea_presupuesto] = 0;
-    ejecutadoPorLinea[m.id_linea_presupuesto] += m.monto;
-  });
-
-  const budgetLines = await _getDbLines();
-  const modifiedLines = [];
-  budgetLines.forEach(line => {
-    const newExec = ejecutadoPorLinea[line.id_linea] || 0;
-    if (line.ejecutadoAcumulado !== newExec) {
-      line.ejecutadoAcumulado = newExec;
-      recalculateLine(line);
-      modifiedLines.push(line);
-    }
-  });
-
-  if (modifiedLines.length > 0) {
-    await supabaseRepository.upsertBudgetLines(modifiedLines);
-  }
-
-  const logEntry = {
-    fecha: new Date().toISOString(),
-    facturas: invoices.length,
-    ordenes: orders.length,
-    movimientosVinculados: newMovements.length,
+  const logFile = 'C:\\Users\\jmeji\\Documents\\Antigravity\\Presupuesto2026\\dolibarr_debug.log';
+  const log = (msg) => {
+    const timestamp = new Date().toISOString();
+    fs.appendFileSync(logFile, `[${timestamp}] ${msg}\n`);
+    console.log(msg);
   };
-  syncLog.push(logEntry);
 
-  return logEntry;
+  const cfg = dolibarrConfig || config.dolibarr;
+  log(`[Sync] Starting sync for year: ${cfg.year} with URL: ${cfg.url}`);
+
+  try {
+    log('[Sync] Calling fetchInvoices...');
+    const [invoices, orders] = await Promise.all([
+      fetchInvoices(cfg),
+      fetchPurchaseOrders(cfg),
+    ]);
+
+    log(`[Sync] Invoices fetched: ${invoices.length}`);
+    log(`[Sync] Orders fetched: ${orders.length}`);
+
+    if (invoices.length > 0) {
+      log(`[Sync] Sample invoice ref: ${invoices[0].ref}, options: ${JSON.stringify(invoices[0].array_options)}`);
+    }
+
+    const budgetLines = await _getDbLines();
+    log(`[Sync] Budget lines in DB: ${budgetLines.length}`);
+
+    // Crear mapa de idConsecutivo a id_linea (UUID) para vinculación rápida
+    const idMap = {};
+    budgetLines.forEach(l => {
+      if (l.idConsecutivo) {
+        idMap[String(l.idConsecutivo)] = l.id_linea;
+      }
+    });
+
+    const newMovements = [];
+
+    invoices.forEach(inv => {
+      const mov = createMovement({ ...inv, tipo_documento: 'factura_proveedor' });
+      // Si no tiene ppto en la cabecera, buscar en las líneas
+      if (!mov.id_linea_presupuesto && inv.lines) {
+        inv.lines.forEach(line => {
+          if (line.array_options && line.array_options.options_ppto) {
+            mov.id_linea_presupuesto = line.array_options.options_ppto;
+          }
+        });
+      }
+
+      if (mov.id_linea_presupuesto && idMap[String(mov.id_linea_presupuesto)]) {
+        mov.id_linea_presupuesto_uuid = idMap[String(mov.id_linea_presupuesto)];
+        newMovements.push(mov);
+      }
+    });
+
+    orders.forEach(ord => {
+      const mov = createMovement({ ...ord, tipo_documento: 'orden_compra' });
+      // Si no tiene ppto en la cabecera, buscar en las líneas
+      if (!mov.id_linea_presupuesto && ord.lines) {
+        ord.lines.forEach(line => {
+          if (line.array_options && line.array_options.options_ppto) {
+            mov.id_linea_presupuesto = line.array_options.options_ppto;
+          }
+        });
+      }
+
+      if (mov.id_linea_presupuesto && idMap[String(mov.id_linea_presupuesto)]) {
+        mov.id_linea_presupuesto_uuid = idMap[String(mov.id_linea_presupuesto)];
+        newMovements.push(mov);
+      }
+    });
+
+    movements = newMovements;
+
+    const ejecutadoPorLinea = {};
+    movements.forEach(m => {
+      const targetId = m.id_linea_presupuesto_uuid;
+      if (!ejecutadoPorLinea[targetId]) ejecutadoPorLinea[targetId] = 0;
+      ejecutadoPorLinea[targetId] += m.monto;
+    });
+
+    const modifiedLines = [];
+    budgetLines.forEach(line => {
+      const newExec = ejecutadoPorLinea[line.id_linea] || 0;
+      if (line.ejecutadoAcumulado !== newExec) {
+        line.ejecutadoAcumulado = newExec;
+        recalculateLine(line);
+        modifiedLines.push(line);
+      }
+    });
+
+    if (modifiedLines.length > 0) {
+      await supabaseRepository.upsertBudgetLines(modifiedLines);
+    }
+
+    const logEntry = {
+      fecha: new Date().toISOString(),
+      facturas: invoices.length,
+      ordenes: orders.length,
+      movimientosVinculados: newMovements.length,
+    };
+    syncLog.push(logEntry);
+
+    return logEntry;
+  } catch (error) {
+    log(`[Sync] Error during sync: ${error.message}`);
+    throw error;
+  }
 }
 
 /**

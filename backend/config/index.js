@@ -6,8 +6,8 @@ const config = {
   excelFilePath: process.env.EXCEL_FILE_PATH || '',
   excelSheetName: process.env.EXCEL_SHEET_NAME || 'Detalle',
   dolibarr: {
-    url: process.env.DOLIBARR_URL || '',
-    apiKey: process.env.DOLIBARR_API_KEY || '',
+    url: process.env.DOLIBARR_URL || 'http://www.a-maqerp.com',
+    apiKey: process.env.DOLIBARR_API_KEY || '4739JKj46PMqPE9YXbwtn5ji6C7ZgzuK',
     year: process.env.DOLIBARR_YEAR || '2026',
   },
   supabase: {

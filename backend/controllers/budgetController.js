@@ -272,6 +272,7 @@ router.post('/sync-dolibarr', async (req, res) => {
       ...result,
     });
   } catch (error) {
+    console.error('Error en sync-dolibarr:', error);
     res.status(500).json({ error: error.message });
   }
 });
