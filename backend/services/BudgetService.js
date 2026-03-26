@@ -7,6 +7,7 @@ const uuidv4 = () => crypto.randomUUID();
 const config = require('../config');
 const supabaseRepository = require('../repositories/supabaseRepository');
 const fs = require('fs');
+const path = require('path');
 
 // Estado en memoria
 let movements = [];
@@ -469,11 +470,19 @@ async function getWeeklyFlow(filters = {}) {
  * Sincroniza movimientos desde Dolibarr y actualiza ejecutado en Supabase.
  */
 async function syncDolibarr(dolibarrConfig) {
-  const logFile = 'C:\\Users\\jmeji\\Documents\\Antigravity\\Presupuesto2026\\dolibarr_debug.log';
+  const isVercel = process.env.VERCEL || process.env.NODE_ENV === 'production';
   const log = (msg) => {
     const timestamp = new Date().toISOString();
-    fs.appendFileSync(logFile, `[${timestamp}] ${msg}\n`);
-    console.log(msg);
+    console.log(`[${timestamp}] ${msg}`);
+    // Solo intentar escribir en archivo si NO estamos en Vercel
+    if (!isVercel) {
+      try {
+        const logFile = path.join(__dirname, '..', '..', 'dolibarr_sync.log');
+        fs.appendFileSync(logFile, `[${timestamp}] ${msg}\n`);
+      } catch (e) {
+        // Ignorar errores de escritura de log
+      }
+    }
   };
 
   const cfg = dolibarrConfig || config.dolibarr;
