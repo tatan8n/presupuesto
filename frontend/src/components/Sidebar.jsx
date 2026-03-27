@@ -1,13 +1,15 @@
-import { LayoutDashboard, Table2, CalendarDays, Settings, Upload, RefreshCw } from 'lucide-react';
+import { LayoutDashboard, Table2, CalendarDays, Settings, Upload, RefreshCw, ArrowLeftRight } from 'lucide-react';
 
 const navItems = [
   { key: 'dashboard', label: 'Dashboard', icon: LayoutDashboard, section: 'Principal' },
   { key: 'detalle', label: 'Detalle Presupuesto', icon: Table2, section: 'Principal' },
   { key: 'semanal', label: 'Flujo Semanal', icon: CalendarDays, section: 'Principal' },
+  { key: 'traslados', label: 'Traslados', icon: ArrowLeftRight, section: 'Principal' },
   { key: 'importar', label: 'Importar Excel', icon: Upload, section: 'Datos' },
   { key: 'dolibarr', label: 'Sincronizar Dolibarr', icon: RefreshCw, section: 'Datos' },
   { key: 'configuracion', label: 'Configuración', icon: Settings, section: 'Sistema' },
 ];
+
 
 export default function Sidebar({ currentView, onNavigate }) {
   let lastSection = '';
@@ -47,7 +49,7 @@ export default function Sidebar({ currentView, onNavigate }) {
 
       <div className="sidebar-footer">
         © 2026 Control Presupuestario <br />
-        <span style={{ fontSize: '0.65rem', opacity: 0.5 }}>v1.1.2-weeks</span>
+        <span style={{ fontSize: '0.65rem', opacity: 0.5 }}>v1.2.0-mejoras</span>
       </div>
     </aside>
   );

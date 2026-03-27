@@ -1,8 +1,11 @@
-import { DollarSign, TrendingDown, TrendingUp, Target } from 'lucide-react';
+import { DollarSign, TrendingDown, TrendingUp, Target, ArrowLeftRight } from 'lucide-react';
 import { formatCurrency, formatPercentage } from '../utils/formatters';
 
 export default function KPICards({ kpis }) {
   if (!kpis) return null;
+
+  // Diferencia entre Ppto. Inicial y Actual (cuánto cambió el presupuesto vs lo aprobado)
+  const diferencia = (kpis.totalPresupuestoInicial || 0) - (kpis.totalPresupuesto || 0);
 
   const cards = [
     {
@@ -24,18 +27,18 @@ export default function KPICards({ kpis }) {
     },
     {
       key: 'difference',
-      label: 'Diferencia (Actual)',
-      value: formatCurrency(kpis.saldo || 0),
-      sub: 'Saldo disponible',
-      icon: TrendingUp,
+      label: 'Diferencia (Inicial − Actual)',
+      value: formatCurrency(Math.abs(diferencia)),
+      sub: diferencia > 0 ? '↑ Inicial mayor al actual' : diferencia < 0 ? '↑ Actual mayor al inicial' : 'Sin variación',
+      icon: ArrowLeftRight,
       type: 'difference',
-      valueClass: kpis.saldo >= 0 ? 'success' : 'danger',
+      valueClass: diferencia > 0 ? 'success' : diferencia < 0 ? 'danger' : '',
     },
     {
       key: 'compliance',
-      label: '% de Ejecución',
+      label: '% Ejecución',
       value: formatPercentage(kpis.porcentajeEjecucion || 0),
-      sub: 'Sobre P. Actual',
+      sub: `Sobre P. Inicial: ${formatPercentage(kpis.porcentajeEjecucionInicial || 0)}`,
       icon: Target,
       type: 'compliance',
     },
@@ -51,7 +54,10 @@ export default function KPICards({ kpis }) {
               <Icon />
               {card.label}
             </div>
-            <div className={`kpi-value ${card.valueClass || ''}`} style={card.key === 'budget-combined' ? { fontSize: '1.1rem' } : {}}>
+            <div
+              className={`kpi-value ${card.valueClass || ''}`}
+              style={card.key === 'budget-combined' ? { fontSize: '1.1rem' } : {}}
+            >
               {card.value}
             </div>
             <div className="kpi-sub">{card.sub}</div>

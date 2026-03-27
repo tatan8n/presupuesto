@@ -14,15 +14,12 @@ const storage = multer.diskStorage({
     const uploadsDir = isVercel ? '/tmp' : path.join(__dirname, '..', '..', 'uploads');
     
     if (!isVercel && !fs.existsSync(uploadsDir)) {
-      try {
-        fs.mkdirSync(uploadsDir, { recursive: true });
-      } catch (e) {}
+      try { fs.mkdirSync(uploadsDir, { recursive: true }); } catch (e) {}
     }
     cb(null, uploadsDir);
   },
   filename: (req, file, cb) => {
-    const timestamp = Date.now();
-    cb(null, `${timestamp}_${file.originalname}`);
+    cb(null, `${Date.now()}_${file.originalname}`);
   },
 });
 const upload = multer({ storage });
@@ -31,36 +28,22 @@ const upload = multer({ storage });
 // CARGA Y DATOS
 // ==========================================
 
-/**
- * POST /api/budget/upload
- * Sube un archivo Excel y carga el presupuesto en la base de datos Supabase.
- */
+/** POST /api/budget/upload — Sube Excel y carga presupuesto en Supabase */
 router.post('/upload', upload.single('file'), async (req, res) => {
   try {
-    if (!req.file) {
-      return res.status(400).json({ error: 'No se recibió ningún archivo.' });
-    }
-
+    if (!req.file) return res.status(400).json({ error: 'No se recibió ningún archivo.' });
     const sheetName = req.body.sheetName || 'Detalle';
     const result = await budgetService.loadBudget(req.file.path, sheetName);
-
-    res.json({
-      message: `Presupuesto cargado exitosamente en Supabase: ${result.totalLines} líneas.`,
-      ...result,
-    });
+    res.json({ message: `Presupuesto cargado exitosamente en Supabase: ${result.totalLines} líneas.`, ...result });
   } catch (error) {
     console.error('Error al cargar presupuesto:', error);
     res.status(500).json({ error: error.message });
   }
 });
 
-/**
- * POST /api/budget/load-default
- * Carga el archivo Excel por defecto en la base de datos Supabase.
- */
+/** POST /api/budget/load-default — Carga el Excel por defecto */
 router.post('/load-default', async (req, res) => {
   try {
-    const fs = require('fs');
     const defaultPath = (req.body && req.body.filePath) ? req.body.filePath : path.join(
       __dirname, '..', '..', 'Presupuesto general A-MAQ 2026 Rev 13-01-25 - 7300.xlsx'
     );
@@ -68,7 +51,6 @@ router.post('/load-default', async (req, res) => {
 
     if (!fs.existsSync(defaultPath)) {
       console.warn(`⚠️ Archivo por defecto no encontrado en: ${defaultPath}. Omitiendo carga inicial.`);
-      // Si el archivo no existe, simplemente respondemos éxito para permitir que la app use los datos de Supabase
       return res.json({
         message: 'Archivo base no encontrado. Se utilizarán los datos existentes en Supabase.',
         totalLines: 0,
@@ -77,11 +59,7 @@ router.post('/load-default', async (req, res) => {
     }
 
     const result = await budgetService.loadBudget(defaultPath, sheetName);
-
-    res.json({
-      message: `Presupuesto base cargado: ${result.totalLines} líneas.`,
-      ...result,
-    });
+    res.json({ message: `Presupuesto base cargado: ${result.totalLines} líneas.`, ...result });
   } catch (error) {
     console.error('Error al cargar presupuesto por defecto:', error);
     res.status(500).json({ error: error.message });
@@ -92,10 +70,7 @@ router.post('/load-default', async (req, res) => {
 // KPIs E INDICADORES
 // ==========================================
 
-/**
- * GET /api/budget/kpis
- * Obtiene KPIs globales con filtros opcionales de Supabase.
- */
+/** GET /api/budget/kpis — KPIs globales con filtros */
 router.get('/kpis', async (req, res) => {
   try {
     const kpis = await budgetService.getKPIs(req.query);
@@ -105,10 +80,7 @@ router.get('/kpis', async (req, res) => {
   }
 });
 
-/**
- * GET /api/budget/monthly
- * Datos mensuales para gráficos.
- */
+/** GET /api/budget/monthly — Datos mensuales para gráficos */
 router.get('/monthly', async (req, res) => {
   try {
     const data = await budgetService.getMonthlyData(req.query);
@@ -118,10 +90,7 @@ router.get('/monthly', async (req, res) => {
   }
 });
 
-/**
- * GET /api/budget/weekly-flow
- * Flujo semanal estimado.
- */
+/** GET /api/budget/weekly-flow — Flujo semanal estimado */
 router.get('/weekly-flow', async (req, res) => {
   try {
     const data = await budgetService.getWeeklyFlow(req.query);
@@ -131,10 +100,7 @@ router.get('/weekly-flow', async (req, res) => {
   }
 });
 
-/**
- * GET /api/budget/filters
- * Opciones de filtros disponibles.
- */
+/** GET /api/budget/filters — Opciones de filtros disponibles */
 router.get('/filters', async (req, res) => {
   try {
     const options = await budgetService.getFilterOptions();
@@ -148,10 +114,7 @@ router.get('/filters', async (req, res) => {
 // CRUD DE LÍNEAS
 // ==========================================
 
-/**
- * GET /api/budget
- * Lista líneas de presupuesto con filtros.
- */
+/** GET /api/budget — Lista líneas; ?includeDeleted=true para incluir eliminadas */
 router.get('/', async (req, res) => {
   try {
     const lines = await budgetService.getBudgetLines(req.query);
@@ -161,10 +124,7 @@ router.get('/', async (req, res) => {
   }
 });
 
-/**
- * GET /api/budget/export-weekly
- * Descarga el flujo de caja en formato de 52 semanas (con opciones de recorte)
- */
+/** GET /api/budget/export-weekly — Descarga flujo de caja 52 semanas */
 router.get('/export-weekly', async (req, res) => {
   try {
     const { startWeek, endWeek, simplified, ...filters } = req.query;
@@ -182,10 +142,7 @@ router.get('/export-weekly', async (req, res) => {
   }
 });
 
-/**
- * GET /api/budget/:id
- * Obtiene una línea por ID.
- */
+/** GET /api/budget/:id — Obtiene una línea por ID */
 router.get('/:id', async (req, res) => {
   try {
     const line = await budgetService.getBudgetLineById(req.params.id);
@@ -196,10 +153,7 @@ router.get('/:id', async (req, res) => {
   }
 });
 
-/**
- * POST /api/budget
- * Crea una nueva línea.
- */
+/** POST /api/budget — Crea una nueva línea */
 router.post('/', async (req, res) => {
   try {
     const line = await budgetService.createLine(req.body);
@@ -209,10 +163,7 @@ router.post('/', async (req, res) => {
   }
 });
 
-/**
- * PUT /api/budget/:id
- * Actualiza una línea existente.
- */
+/** PUT /api/budget/:id — Actualiza una línea existente */
 router.put('/:id', async (req, res) => {
   try {
     const line = await budgetService.updateLine(req.params.id, req.body);
@@ -222,14 +173,22 @@ router.put('/:id', async (req, res) => {
   }
 });
 
-/**
- * DELETE /api/budget/:id
- * Elimina una línea (lógica por defecto, física si ?physical=true).
- */
+/** PUT /api/budget/:id/restore — Restaura una línea eliminada */
+router.put('/:id/restore', async (req, res) => {
+  try {
+    const result = await budgetService.restoreLine(req.params.id);
+    res.json(result);
+  } catch (error) {
+    res.status(400).json({ error: error.message });
+  }
+});
+
+/** DELETE /api/budget/:id — Eliminación lógica (estado='eliminada') */
 router.delete('/:id', async (req, res) => {
   try {
     const physical = req.query.physical === 'true';
-    const result = await budgetService.deleteLine(req.params.id, physical);
+    const reason = req.body.reason || 'No especificado';
+    const result = await budgetService.deleteLine(req.params.id, reason, physical);
     res.json(result);
   } catch (error) {
     res.status(500).json({ error: error.message });
@@ -237,50 +196,81 @@ router.delete('/:id', async (req, res) => {
 });
 
 // ==========================================
-// GUARDAR Y SINCRONIZAR
+// TRASLADOS DE PRESUPUESTO
 // ==========================================
 
-/**
- * POST /api/budget/save-excel
- * Guarda los datos actuales de Supabase en un archivo Excel.
- */
-router.post('/save-excel', async (req, res) => {
+/** GET /api/budget/transfers — Lista todos los traslados */
+router.get('/transfers/list', async (req, res) => {
   try {
-    const defaultPath = req.body.filePath || path.join(__dirname, '..', '..', 'Presupuesto general A-MAQ 2026 Rev 13-01-25 - 7300.xlsx');
-    const result = await budgetService.saveToExcel(defaultPath, req.body.sheetName || 'Detalle');
-    res.json({
-      message: `Archivo exportado/guardado satisfactoriamente. Backup en: ${result.backupPath}`,
-      ...result,
-    });
+    const transfers = await budgetService.listTransfers();
+    res.json(transfers);
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
 });
 
+/** POST /api/budget/transfers — Solicita un nuevo traslado (pendiente) */
+router.post('/transfers', async (req, res) => {
+  try {
+    const { fromId, toId, amounts, motivo } = req.body;
+    if (!fromId || !toId || !amounts) {
+      return res.status(400).json({ error: 'Se requieren fromId, toId y amounts.' });
+    }
+    const transfer = await budgetService.createTransfer(fromId, toId, amounts, motivo);
+    res.status(201).json(transfer);
+  } catch (error) {
+    res.status(400).json({ error: error.message });
+  }
+});
 
+/** POST /api/budget/transfers/:id/approve — Aprueba un traslado pendiente */
+router.post('/transfers/:id/approve', async (req, res) => {
+  try {
+    const result = await budgetService.approveTransfer(req.params.id, req.body.approvedBy);
+    res.json(result);
+  } catch (error) {
+    res.status(400).json({ error: error.message });
+  }
+});
 
-/**
- * POST /api/budget/sync-dolibarr
- * Sincroniza movimientos desde Dolibarr.
- */
+/** POST /api/budget/transfers/:id/reject — Rechaza un traslado pendiente */
+router.post('/transfers/:id/reject', async (req, res) => {
+  try {
+    const result = await budgetService.rejectTransfer(req.params.id, req.body.reason);
+    res.json(result);
+  } catch (error) {
+    res.status(400).json({ error: error.message });
+  }
+});
+
+// ==========================================
+// GUARDAR Y SINCRONIZAR
+// ==========================================
+
+/** POST /api/budget/save-excel — Guarda datos en Excel */
+router.post('/save-excel', async (req, res) => {
+  try {
+    const defaultPath = req.body.filePath || path.join(__dirname, '..', '..', 'Presupuesto general A-MAQ 2026 Rev 13-01-25 - 7300.xlsx');
+    const result = await budgetService.saveToExcel(defaultPath, req.body.sheetName || 'Detalle');
+    res.json({ message: `Archivo exportado/guardado satisfactoriamente. Backup en: ${result.backupPath}`, ...result });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+/** POST /api/budget/sync-dolibarr — Sincroniza movimientos desde Dolibarr */
 router.post('/sync-dolibarr', async (req, res) => {
   try {
     const dolibarrConfig = req.body.dolibarrConfig || null;
     const result = await budgetService.syncDolibarr(dolibarrConfig);
-    res.json({
-      message: 'Sincronización completada.',
-      ...result,
-    });
+    res.json({ message: 'Sincronización completada.', ...result });
   } catch (error) {
     console.error('Error en sync-dolibarr:', error);
     res.status(500).json({ error: error.message });
   }
 });
 
-/**
- * GET /api/budget/sync-log
- * Historial de sincronizaciones.
- */
+/** GET /api/budget/config/sync-log — Historial de sincronizaciones */
 router.get('/config/sync-log', async (req, res) => {
   try {
     res.json(await budgetService.getSyncLog());

@@ -182,8 +182,8 @@ body.processing, body.processing * {
 }
 
 .sidebar-logo {
-  width: 38px;
-  height: 38px;
+  width: 76px;
+  height: 76px;
   border-radius: var(--radius-md);
   object-fit: contain;
   filter: brightness(0) invert(1);

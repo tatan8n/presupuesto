@@ -18,8 +18,40 @@ const MONTH_KEYS = [
   'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'
 ];
 
+// ============================================================
+// Cache en memoria con TTL para reducir peticiones a Supabase
+// Las operaciones de escritura invalidan el cache.
+// ============================================================
+let _cache = null;      // Array de líneas activas
+let _cacheTs = 0;       // Timestamp de última carga
+const CACHE_TTL_MS = 30_000; // 30 segundos
+
+function _invalidateCache() {
+  _cache = null;
+  _cacheTs = 0;
+}
+
+/**
+ * Devuelve líneas de presupuesto activas (excluye 'eliminada').
+ * Usa cache con TTL de 30s para evitar múltiples round-trips a Supabase.
+ */
 async function _getDbLines() {
+  const now = Date.now();
+  if (_cache && (now - _cacheTs) < CACHE_TTL_MS) {
+    return _cache;
+  }
   const data = await supabaseRepository.getAllBudgetLines();
+  _cache = data.map(supabaseRepository.mapSupabaseToApp);
+  _cacheTs = Date.now();
+  return _cache;
+}
+
+/**
+ * Devuelve TODAS las líneas incluyendo las eliminadas (para la vista de tabla).
+ * No usa cache ya que es una consulta especial para el panel de administración.
+ */
+async function _getAllDbLinesIncludeDeleted() {
+  const data = await supabaseRepository.getAllBudgetLinesIncludeDeleted();
   return data.map(supabaseRepository.mapSupabaseToApp);
 }
 
@@ -74,8 +106,9 @@ async function loadBudget(filePath, sheetName = 'Detalle') {
     return recalculateLine(newLine);
   });
   
-  // Enviar las nuevas líneas a Supabase
+  // Enviar las nuevas líneas a Supabase e invalidar cache
   await supabaseRepository.upsertBudgetLines(newLines);
+  _invalidateCache();
   
   return {
     totalLines: newLines.length,
@@ -127,34 +160,42 @@ async function getSummary() {
 
 /**
  * Obtiene líneas de presupuesto con filtros opcionales.
+ * Si includeDeleted=true, devuelve también las eliminadas (para la tabla de detalle).
  */
 async function getBudgetLines(filters = {}) {
-  let result = await _getDbLines();
-  // Helper: if value is already an array, use it; otherwise split by ||| (safe separator that won't appear in names)
+  // Decidir si incluir eliminadas
+  const includeDeleted = filters.includeDeleted === 'true' || filters.includeDeleted === true;
+  const { includeDeleted: _removed, ...cleanFilters } = filters;
+
+  let result = includeDeleted
+    ? await _getAllDbLinesIncludeDeleted()
+    : await _getDbLines();
+
+  // Helper: if value is already an array, use it; otherwise split by ||| (safe separator)
   const toArray = (val) => Array.isArray(val) ? val : String(val).split('|||').filter(Boolean);
 
-  if (filters.area) {
-    const arr = toArray(filters.area);
+  if (cleanFilters.area) {
+    const arr = toArray(cleanFilters.area);
     if (arr.length > 0) result = result.filter(l => arr.includes(l.area));
   }
-  if (filters.linea) {
-    const arr = toArray(filters.linea);
+  if (cleanFilters.linea) {
+    const arr = toArray(cleanFilters.linea);
     if (arr.length > 0) result = result.filter(l => arr.includes(l.linea));
   }
-  if (filters.escenario) {
-    const arr = toArray(filters.escenario).map(Number);
+  if (cleanFilters.escenario) {
+    const arr = toArray(cleanFilters.escenario).map(Number);
     if (arr.length > 0) result = result.filter(l => arr.includes(l.escenario));
   }
-  if (filters.icgi) {
-    const arr = toArray(filters.icgi);
+  if (cleanFilters.icgi) {
+    const arr = toArray(cleanFilters.icgi);
     if (arr.length > 0) result = result.filter(l => arr.includes(l.icgi));
   }
-  if (filters.cuentaContable) {
-    const arr = toArray(filters.cuentaContable);
+  if (cleanFilters.cuentaContable) {
+    const arr = toArray(cleanFilters.cuentaContable);
     if (arr.length > 0) result = result.filter(l => arr.includes(l.cuentaContable));
   }
-  if (filters.search) {
-    const s = filters.search.toLowerCase();
+  if (cleanFilters.search) {
+    const s = cleanFilters.search.toLowerCase();
     result = result.filter(l =>
       l.nombreElemento.toLowerCase().includes(s) ||
       l.cuenta.toLowerCase().includes(s) ||
@@ -162,7 +203,7 @@ async function getBudgetLines(filters = {}) {
     );
   }
 
-  if (filters.filterEERR === 'true' || filters.filterEERR === true) {
+  if (cleanFilters.filterEERR === 'true' || cleanFilters.filterEERR === true) {
     result = result.filter(line => {
       const isIngreso = (line.cuenta || '').startsWith('01');
       const cc = (line.cuentaContable || '').toLowerCase();
@@ -179,12 +220,14 @@ async function getBudgetLines(filters = {}) {
  * Obtiene una línea por su ID.
  */
 async function getBudgetLineById(id) {
-  const lines = await _getDbLines();
+  const lines = await _getAllDbLinesIncludeDeleted();
   return lines.find(l => l.id_linea === id) || null;
 }
 
 /**
  * Crea una nueva línea de presupuesto en Supabase.
+ * Al crear una línea nueva, el presupuesto inicial (og*) siempre es 0.
+ * Solo se puede editar el presupuesto actual.
  */
 async function createLine(data) {
   const line = {
@@ -195,54 +238,35 @@ async function createLine(data) {
     nombreElemento: data.nombreElemento || '',
     escenario: parseInt(data.escenario) || 1,
     fecha: data.fecha || null,
+    // Presupuesto actual (editable)
     enero: parseFloat(data.enero) || 0,
-    ogEnero: parseFloat(data.ogEnero) || parseFloat(data.enero) || 0,
-    fechaEnero: data.fechaEnero || '',
-    lineaEnero: data.lineaEnero || '',
     febrero: parseFloat(data.febrero) || 0,
-    ogFebrero: parseFloat(data.ogFebrero) || parseFloat(data.febrero) || 0,
-    fechaFebrero: data.fechaFebrero || '',
-    lineaFebrero: data.lineaFebrero || '',
     marzo: parseFloat(data.marzo) || 0,
-    ogMarzo: parseFloat(data.ogMarzo) || parseFloat(data.marzo) || 0,
-    fechaMarzo: data.fechaMarzo || '',
-    lineaMarzo: data.lineaMarzo || '',
     abril: parseFloat(data.abril) || 0,
-    ogAbril: parseFloat(data.ogAbril) || parseFloat(data.abril) || 0,
-    fechaAbril: data.fechaAbril || '',
-    lineaAbril: data.lineaAbril || '',
     mayo: parseFloat(data.mayo) || 0,
-    ogMayo: parseFloat(data.ogMayo) || parseFloat(data.mayo) || 0,
-    fechaMayo: data.fechaMayo || '',
-    lineaMayo: data.lineaMayo || '',
     junio: parseFloat(data.junio) || 0,
-    ogJunio: parseFloat(data.ogJunio) || parseFloat(data.junio) || 0,
-    fechaJunio: data.fechaJunio || '',
-    lineaJunio: data.lineaJunio || '',
     julio: parseFloat(data.julio) || 0,
-    ogJulio: parseFloat(data.ogJulio) || parseFloat(data.julio) || 0,
-    fechaJulio: data.fechaJulio || '',
-    lineaJulio: data.lineaJulio || '',
     agosto: parseFloat(data.agosto) || 0,
-    ogAgosto: parseFloat(data.ogAgosto) || parseFloat(data.agosto) || 0,
-    fechaAgosto: data.fechaAgosto || '',
-    lineaAgosto: data.lineaAgosto || '',
     septiembre: parseFloat(data.septiembre) || 0,
-    ogSeptiembre: parseFloat(data.ogSeptiembre) || parseFloat(data.septiembre) || 0,
-    fechaSeptiembre: data.fechaSeptiembre || '',
-    lineaSeptiembre: data.lineaSeptiembre || '',
     octubre: parseFloat(data.octubre) || 0,
-    ogOctubre: parseFloat(data.ogOctubre) || parseFloat(data.octubre) || 0,
-    fechaOctubre: data.fechaOctubre || '',
-    lineaOctubre: data.lineaOctubre || '',
     noviembre: parseFloat(data.noviembre) || 0,
-    ogNoviembre: parseFloat(data.ogNoviembre) || parseFloat(data.noviembre) || 0,
-    fechaNoviembre: data.fechaNoviembre || '',
-    lineaNoviembre: data.lineaNoviembre || '',
     diciembre: parseFloat(data.diciembre) || 0,
-    ogDiciembre: parseFloat(data.ogDiciembre) || parseFloat(data.diciembre) || 0,
-    fechaDiciembre: data.fechaDiciembre || '',
-    lineaDiciembre: data.lineaDiciembre || '',
+    // Presupuesto inicial siempre en 0 para líneas nuevas
+    ogEnero: 0, ogFebrero: 0, ogMarzo: 0, ogAbril: 0, ogMayo: 0, ogJunio: 0,
+    ogJulio: 0, ogAgosto: 0, ogSeptiembre: 0, ogOctubre: 0, ogNoviembre: 0, ogDiciembre: 0,
+    // Fechas y líneas por mes
+    fechaEnero: data.fechaEnero || '', lineaEnero: data.lineaEnero || '',
+    fechaFebrero: data.fechaFebrero || '', lineaFebrero: data.lineaFebrero || '',
+    fechaMarzo: data.fechaMarzo || '', lineaMarzo: data.lineaMarzo || '',
+    fechaAbril: data.fechaAbril || '', lineaAbril: data.lineaAbril || '',
+    fechaMayo: data.fechaMayo || '', lineaMayo: data.lineaMayo || '',
+    fechaJunio: data.fechaJunio || '', lineaJunio: data.lineaJunio || '',
+    fechaJulio: data.fechaJulio || '', lineaJulio: data.lineaJulio || '',
+    fechaAgosto: data.fechaAgosto || '', lineaAgosto: data.lineaAgosto || '',
+    fechaSeptiembre: data.fechaSeptiembre || '', lineaSeptiembre: data.lineaSeptiembre || '',
+    fechaOctubre: data.fechaOctubre || '', lineaOctubre: data.lineaOctubre || '',
+    fechaNoviembre: data.fechaNoviembre || '', lineaNoviembre: data.lineaNoviembre || '',
+    fechaDiciembre: data.fechaDiciembre || '', lineaDiciembre: data.lineaDiciembre || '',
     total: 0,
     totalOriginal: 0,
     icgi: data.icgi || '',
@@ -256,6 +280,7 @@ async function createLine(data) {
 
   recalculateLine(line);
   await supabaseRepository.upsertBudgetLines([line]);
+  _invalidateCache();
   return line;
 }
 
@@ -293,13 +318,16 @@ async function updateLine(id, data) {
 
   recalculateLine(line);
   await supabaseRepository.updateBudgetLine(id, line);
+  _invalidateCache();
   return line;
 }
 
 /**
- * Elimina una línea.
+ * Eliminación lógica: marca la línea como 'eliminada'.
+ * La línea NO desaparece de la BD, solo deja de contar en KPIs.
+ * Si physical=true, elimina físicamente (solo para mantenimiento extremo).
  */
-async function deleteLine(id, physical = false) {
+async function deleteLine(id, reason = 'No especificado', physical = false) {
   const line = await getBudgetLineById(id);
   if (!line) throw new Error(`Línea ${id} no encontrada.`);
 
@@ -308,8 +336,36 @@ async function deleteLine(id, physical = false) {
     throw new Error('No se puede eliminar físicamente una línea con movimientos vinculados. Use eliminación lógica.');
   }
 
-  await supabaseRepository.deleteBudgetLine(id, physical);
+  if (physical) {
+    await supabaseRepository.deleteBudgetLine(id, true);
+  } else {
+    // Eliminación lógica: estado='eliminada', anexar motivo a observaciones
+    const tag = `[Motivo Eliminación: ${reason}]`;
+    let newObs = line.observaciones || '';
+    if (!newObs.includes('[Motivo Eliminación:')) {
+      newObs = newObs ? `${newObs}\n${tag}` : tag;
+    }
+    await supabaseRepository.updateBudgetLine(id, { estado: 'eliminada', observaciones: newObs });
+  }
+  _invalidateCache();
   return { deleted: true, physical, id };
+}
+
+/**
+ * Restaura una línea previamente eliminada (estado='activa').
+ */
+async function restoreLine(id) {
+  const lines = await _getAllDbLinesIncludeDeleted();
+  const line = lines.find(l => l.id_linea === id);
+  if (!line) throw new Error(`Línea ${id} no encontrada.`);
+  if (line.estado !== 'eliminada') throw new Error(`La línea ${id} no está en estado eliminada.`);
+
+  let newObs = line.observaciones || '';
+  newObs = newObs.replace(/\[Motivo Eliminación:.*?\]/g, '').trim();
+
+  await supabaseRepository.updateBudgetLine(id, { estado: 'activa', observaciones: newObs });
+  _invalidateCache();
+  return { restored: true, id };
 }
 
 /**
@@ -329,11 +385,9 @@ async function exportWeeklyExcel(filters = {}, options = {}) {
   return generateWeeklyCashFlowExcel(lines, options);
 }
 
-/**
- * Calcula KPIs globales con filtros opcionales.
- */
 async function getKPIs(filters = {}) {
-  const lines = await getBudgetLines(filters);
+  // Solicitamos TODAS las líneas (incluidas eliminadas) para no perder su Presupuesto Inicial
+  const lines = await getBudgetLines({ ...filters, includeDeleted: true });
 
   let totalPresupuesto = 0;
   let totalPresupuestoInicial = 0;
@@ -344,64 +398,64 @@ async function getKPIs(filters = {}) {
   const byICGI = {};
 
   lines.forEach(line => {
-    totalPresupuesto += (line.total || 0);
-    totalPresupuestoInicial += (line.totalOriginal || 0);
-    totalEjecutado += (line.ejecutadoAcumulado || 0);
+    const isDeleted = line.estado === 'eliminada';
+    const pInicial = line.totalOriginal || 0;
+    // Líneas eliminadas pierden su presupuesto actual y ejecutado en el dashboard
+    const pActual = isDeleted ? 0 : (line.total || 0);
+    const pEjecutado = isDeleted ? 0 : (line.ejecutadoAcumulado || 0);
 
-    // 1. byArea: stays as is (item-level)
+    totalPresupuesto += pActual;
+    totalPresupuestoInicial += pInicial;
+    totalEjecutado += pEjecutado;
+
+    // byArea
     if (line.area) {
       if (!byArea[line.area]) byArea[line.area] = { presupuesto: 0, presupuestoInicial: 0, ejecutado: 0 };
-      byArea[line.area].presupuesto += (line.total || 0);
-      byArea[line.area].presupuestoInicial += (line.totalOriginal || 0);
-      byArea[line.area].ejecutado += (line.ejecutadoAcumulado || 0);
+      byArea[line.area].presupuesto += pActual;
+      byArea[line.area].presupuestoInicial += pInicial;
+      byArea[line.area].ejecutado += pEjecutado;
     }
 
-    // 2. byLinea: must be calculated month-by-month for overrides
+    // byLinea: calculado mes a mes para respetar overrides
     MONTH_KEYS.forEach(m => {
       const lineaKey = `linea${m.charAt(0).toUpperCase() + m.slice(1)}`;
       const activeLinea = line[lineaKey] || line.linea || 'Sin línea';
-      const amount = line[m] || 0;
+      const amount = isDeleted ? 0 : (line[m] || 0);
       
       if (!byLinea[activeLinea]) byLinea[activeLinea] = { presupuesto: 0, ejecutado: 0 };
       byLinea[activeLinea].presupuesto += amount;
-      // Note: ejecutado is tricky since it's cumulative and not per-month in current schema,
-      // but the user asked for "sumatoria por linea de negocio", so we assume the majority
-      // of cases use the item-level linea for execution or we'll need to refactor execution too.
-      // For now, if we have a monthly amount, we attribute its proportion to the linea.
-      // Actually, since execution is not per month in the backend currently (only total_ejecutado), 
-      // we'll attribute execution proportionally or just to the item's main linea.
-      // Given the prompt, let's focus on the budget (presupuesto).
     });
 
-    // Attribute executed items to the main linea for now (simplified)
+    // Atribuir ejecutado a la línea principal
     if (line.linea) {
       if (!byLinea[line.linea]) byLinea[line.linea] = { presupuesto: 0, ejecutado: 0 };
-      byLinea[line.linea].ejecutado += (line.ejecutadoAcumulado || 0);
+      byLinea[line.linea].ejecutado += pEjecutado;
     }
 
     const esc = `${line.escenario}`;
     if (!byEscenario[esc]) byEscenario[esc] = { presupuesto: 0, presupuestoInicial: 0, ejecutado: 0 };
-    byEscenario[esc].presupuesto += (line.total || 0);
-    byEscenario[esc].presupuestoInicial += (line.totalOriginal || 0);
-    byEscenario[esc].ejecutado += (line.ejecutadoAcumulado || 0);
+    byEscenario[esc].presupuesto += pActual;
+    byEscenario[esc].presupuestoInicial += pInicial;
+    byEscenario[esc].ejecutado += pEjecutado;
 
     if (line.icgi) {
       if (!byICGI[line.icgi]) byICGI[line.icgi] = { presupuesto: 0, presupuestoInicial: 0, ejecutado: 0 };
-      byICGI[line.icgi].presupuesto += (line.total || 0);
-      byICGI[line.icgi].presupuestoInicial += (line.totalOriginal || 0);
-      byICGI[line.icgi].ejecutado += (line.ejecutadoAcumulado || 0);
+      byICGI[line.icgi].presupuesto += pActual;
+      byICGI[line.icgi].presupuestoInicial += pInicial;
+      byICGI[line.icgi].ejecutado += pEjecutado;
     }
   });
 
-  // Cross-tab: ICGI breakdown per business line (línea de negocio)
+  // Cross-tab: ICGI breakdown per business line
   const byLineaICGI = {};
   lines.forEach(line => {
+    const isDeleted = line.estado === 'eliminada';
     const icgi = line.icgi || 'Sin tipo';
     
     MONTH_KEYS.forEach(m => {
       const lineaKey = `linea${m.charAt(0).toUpperCase() + m.slice(1)}`;
       const activeLinea = line[lineaKey] || line.linea || 'Sin línea';
-      const amount = line[m] || 0;
+      const amount = isDeleted ? 0 : (line[m] || 0);
       
       if (!byLineaICGI[activeLinea]) byLineaICGI[activeLinea] = {};
       if (!byLineaICGI[activeLinea][icgi]) byLineaICGI[activeLinea][icgi] = 0;
@@ -409,7 +463,11 @@ async function getKPIs(filters = {}) {
     });
   });
 
-  const monthlyBudget = MONTH_KEYS.map(m => lines.reduce((sum, l) => sum + (l[m] || 0), 0));
+  const monthlyBudget = MONTH_KEYS.map(m => lines.reduce((sum, line) => {
+    return sum + (line.estado === 'eliminada' ? 0 : (line[m] || 0));
+  }, 0));
+
+  const activeLines = lines.filter(l => l.estado !== 'eliminada');
 
   return {
     totalPresupuesto,
@@ -417,14 +475,16 @@ async function getKPIs(filters = {}) {
     totalEjecutado,
     saldo: totalPresupuesto - totalEjecutado,
     saldoInicial: totalPresupuestoInicial - totalEjecutado,
+    diferencia: totalPresupuestoInicial - totalPresupuesto, // Diferencia inicial vs actual
     porcentajeEjecucion: totalPresupuesto > 0 ? (totalEjecutado / totalPresupuesto) * 100 : 0,
+    porcentajeEjecucionInicial: totalPresupuestoInicial > 0 ? (totalEjecutado / totalPresupuestoInicial) * 100 : 0,
     monthlyBudget,
     byArea,
     byLinea,
     byEscenario,
     byICGI,
     byLineaICGI,
-    totalLines: lines.length,
+    totalLines: activeLines.length,
   };
 }
 
@@ -474,14 +534,11 @@ async function syncDolibarr(dolibarrConfig) {
   const log = (msg) => {
     const timestamp = new Date().toISOString();
     console.log(`[${timestamp}] ${msg}`);
-    // Solo intentar escribir en archivo si NO estamos en Vercel
     if (!isVercel) {
       try {
         const logFile = path.join(__dirname, '..', '..', 'dolibarr_sync.log');
         fs.appendFileSync(logFile, `[${timestamp}] ${msg}\n`);
-      } catch (e) {
-        // Ignorar errores de escritura de log
-      }
+      } catch (e) {}
     }
   };
 
@@ -517,7 +574,6 @@ async function syncDolibarr(dolibarrConfig) {
 
     invoices.forEach(inv => {
       const mov = createMovement({ ...inv, tipo_documento: 'factura_proveedor' });
-      // Si no tiene ppto en la cabecera, buscar en las líneas
       if (!mov.id_linea_presupuesto && inv.lines) {
         inv.lines.forEach(line => {
           if (line.array_options && line.array_options.options_ppto) {
@@ -534,7 +590,6 @@ async function syncDolibarr(dolibarrConfig) {
 
     orders.forEach(ord => {
       const mov = createMovement({ ...ord, tipo_documento: 'orden_compra' });
-      // Si no tiene ppto en la cabecera, buscar en las líneas
       if (!mov.id_linea_presupuesto && ord.lines) {
         ord.lines.forEach(line => {
           if (line.array_options && line.array_options.options_ppto) {
@@ -570,6 +625,7 @@ async function syncDolibarr(dolibarrConfig) {
 
     if (modifiedLines.length > 0) {
       await supabaseRepository.upsertBudgetLines(modifiedLines);
+      _invalidateCache(); // Invalidar cache post-sync
     }
 
     const logEntry = {
@@ -618,12 +674,16 @@ async function getSyncLog() {
  * Obtiene los datos mensuales.
  */
 async function getMonthlyData(filters = {}) {
-  const lines = await getBudgetLines(filters);
+  const lines = await getBudgetLines({ ...filters, includeDeleted: true });
 
   return MONTH_KEYS.map((month, index) => {
     const ogMonthKey = `og${month.charAt(0).toUpperCase() + month.slice(1)}`;
-    const total = lines.reduce((sum, l) => sum + (l[month] || 0), 0);
+    
+    // Líneas eliminadas aportan 0 al presupuestado actual
+    const total = lines.reduce((sum, l) => sum + (l.estado === 'eliminada' ? 0 : (l[month] || 0)), 0);
+    // Pero SÍ aportan su presupuesto inicial
     const totalOriginal = lines.reduce((sum, l) => sum + (l[ogMonthKey] || 0), 0);
+    
     return {
       mes: config.months ? config.months[index] : month,
       mesKey: month,
@@ -634,6 +694,168 @@ async function getMonthlyData(filters = {}) {
   });
 }
 
+// ============================================================
+// TRASLADOS DE PRESUPUESTO
+// ============================================================
+
+/**
+ * Crea una solicitud de traslado de presupuesto entre dos líneas.
+ * El traslado queda en estado 'pendiente' hasta ser aprobado.
+ * @param {string} fromId - ID de la línea origen
+ * @param {string} toId - ID de la línea destino
+ * @param {Object} amounts - Montos por mes {enero: X, ...}
+ * @param {string} motivo - Justificación del traslado
+ */
+async function createTransfer(fromId, toId, amounts, motivo) {
+  if (fromId === toId) throw new Error('La línea origen y destino deben ser diferentes.');
+  
+  const fromLine = await getBudgetLineById(fromId);
+  const toLine = await getBudgetLineById(toId);
+  if (!fromLine) throw new Error(`Línea origen ${fromId} no encontrada.`);
+  if (!toLine) throw new Error(`Línea destino ${toId} no encontrada.`);
+
+  // Validar que hay montos
+  let totalAmount = 0;
+  if (Array.isArray(amounts.rows)) {
+    totalAmount = amounts.rows.reduce((s, r) => s + (parseFloat(r.amount) || 0), 0);
+  } else {
+    totalAmount = Object.values(amounts).reduce((s, v) => s + (parseFloat(v) || 0), 0);
+  }
+  if (totalAmount <= 0) throw new Error('El traslado debe tener al menos un monto mayor a cero.');
+
+  const transfer = {
+    from_id_linea: fromId,
+    to_id_linea: toId,
+    amounts,
+    motivo: motivo || '',
+    estado: 'pendiente',
+  };
+
+  const { data, error } = await supabaseRepository.supabase
+    .from('budget_transfers')
+    .insert(transfer)
+    .select()
+    .single();
+
+  if (error) throw error;
+  return data;
+}
+
+/**
+ * Lista todos los traslados con información de las líneas origen y destino.
+ */
+async function listTransfers() {
+  const { data, error } = await supabaseRepository.supabase
+    .from('budget_transfers')
+    .select('*')
+    .order('created_at', { ascending: false });
+
+  if (error) throw error;
+
+  // Enriquecer con nombres de líneas
+  const allLines = await _getAllDbLinesIncludeDeleted();
+  const lineMap = {};
+  allLines.forEach(l => { lineMap[l.id_linea] = l; });
+
+  return (data || []).map(t => ({
+    ...t,
+    fromLine: lineMap[t.from_id_linea] ? {
+      id: t.from_id_linea,
+      nombre: lineMap[t.from_id_linea].nombreElemento,
+      area: lineMap[t.from_id_linea].area,
+    } : { id: t.from_id_linea, nombre: 'Desconocida', area: '' },
+    toLine: lineMap[t.to_id_linea] ? {
+      id: t.to_id_linea,
+      nombre: lineMap[t.to_id_linea].nombreElemento,
+      area: lineMap[t.to_id_linea].area,
+    } : { id: t.to_id_linea, nombre: 'Desconocida', area: '' },
+  }));
+}
+
+/**
+ * Aprueba un traslado pendiente: aplica los montos a las líneas y registra la aprobación.
+ * @param {string} transferId - UUID del traslado
+ * @param {string} approvedBy - Nombre del aprobador
+ */
+async function approveTransfer(transferId, approvedBy = 'Jhonatan Mejía') {
+  const { data: transfer, error } = await supabaseRepository.supabase
+    .from('budget_transfers')
+    .select('*')
+    .eq('id', transferId)
+    .single();
+
+  if (error || !transfer) throw new Error('Traslado no encontrado.');
+  if (transfer.estado !== 'pendiente') throw new Error('Solo se pueden aprobar traslados en estado pendiente.');
+
+  const fromLine = await getBudgetLineById(transfer.from_id_linea);
+  const toLine = await getBudgetLineById(transfer.to_id_linea);
+  if (!fromLine || !toLine) throw new Error('Líneas del traslado no encontradas.');
+
+  const amounts = transfer.amounts || {};
+
+  // Soporte para formato cross-mes: amounts puede tener un array 'rows'
+  // con { fromMonth, toMonth, amount }.  Si no existe, usa el formato
+  // legado { enero: X, febrero: Y, ... } (mismo mes en origen y destino).
+  if (Array.isArray(amounts.rows)) {
+    for (const row of amounts.rows) {
+      const amt = parseFloat(row.amount) || 0;
+      if (amt <= 0) continue;
+      const fm = row.fromMonth;
+      const tm = row.toMonth;
+      if (!MONTH_KEYS.includes(fm) || !MONTH_KEYS.includes(tm)) continue;
+      fromLine[fm] = Math.max(0, (fromLine[fm] || 0) - amt);
+      toLine[tm]   = (toLine[tm] || 0) + amt;
+    }
+  } else {
+    // Formato legado: mismo mes en origen y destino
+    MONTH_KEYS.forEach(month => {
+      const amount = parseFloat(amounts[month]) || 0;
+      if (amount > 0) {
+        fromLine[month] = Math.max(0, (fromLine[month] || 0) - amount);
+        toLine[month]   = (toLine[month] || 0) + amount;
+      }
+    });
+  }
+
+  recalculateLine(fromLine);
+  recalculateLine(toLine);
+
+  // Guardar ambas líneas y marcar aprobado
+  await Promise.all([
+    supabaseRepository.updateBudgetLine(fromLine.id_linea, fromLine),
+    supabaseRepository.updateBudgetLine(toLine.id_linea, toLine),
+    supabaseRepository.supabase
+      .from('budget_transfers')
+      .update({ estado: 'aprobado', approved_at: new Date().toISOString(), approved_by: approvedBy })
+      .eq('id', transferId),
+  ]);
+
+  _invalidateCache();
+  return { approved: true, transferId };
+}
+
+/**
+ * Rechaza un traslado pendiente.
+ */
+async function rejectTransfer(transferId, reason = '') {
+  const { data: transfer, error } = await supabaseRepository.supabase
+    .from('budget_transfers')
+    .select('*')
+    .eq('id', transferId)
+    .single();
+
+  if (error || !transfer) throw new Error('Traslado no encontrado.');
+  if (transfer.estado !== 'pendiente') throw new Error('Solo se pueden rechazar traslados en estado pendiente.');
+
+  const { error: updateError } = await supabaseRepository.supabase
+    .from('budget_transfers')
+    .update({ estado: 'rechazado', rejected_reason: reason })
+    .eq('id', transferId);
+
+  if (updateError) throw updateError;
+  return { rejected: true, transferId };
+}
+
 module.exports = {
   loadBudget,
   getSummary,
@@ -642,6 +864,7 @@ module.exports = {
   createLine,
   updateLine,
   deleteLine,
+  restoreLine,
   saveToExcel,
   exportWeeklyExcel,
   getKPIs,
@@ -650,4 +873,9 @@ module.exports = {
   getFilterOptions,
   getSyncLog,
   getMonthlyData,
+  // Traslados
+  createTransfer,
+  listTransfers,
+  approveTransfer,
+  rejectTransfer,
 };

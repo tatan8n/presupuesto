@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useMemo } from 'react';
-import { X, Copy, Search, Eraser, Calculator, Check } from 'lucide-react';
+import { X, Copy, Search, Eraser, Calculator, Check, Lock, Unlock } from 'lucide-react';
 import CurrencyInput from './CurrencyInput';
+import MasterPinUnlock from './MasterPinUnlock';
 import { getWeeksInMonth, getWeekForDay, getRepresentativeDayInWeek } from '../utils/dateUtils';
 
 const MONTH_FIELDS = [
@@ -55,6 +56,9 @@ export default function BudgetForm({ line, filterOptions, budgetLines, onSave, o
   const [annualInitialInput, setAnnualInitialInput] = useState('');
   const [annualCurrentInput, setAnnualCurrentInput] = useState('');
   const [weekInputText, setWeekInputText] = useState('');
+  // PIN lock para edición del Presupuesto Inicial (estado global de sesión)
+  const [initialUnlocked, setInitialUnlocked] = useState(() => sessionStorage.getItem('master_unlocked') === 'true');
+  const [showPinModal, setShowPinModal] = useState(false);
   const baseLineDropdownRef = useRef(null);
   const isEditing = !!line;
 
@@ -68,6 +72,7 @@ export default function BudgetForm({ line, filterOptions, budgetLines, onSave, o
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
+  // Al editar o cargar una línea, respetamos el estado global (no re-bloquear)
   useEffect(() => {
     if (line) {
       const clampedLine = { ...line };
@@ -246,6 +251,20 @@ export default function BudgetForm({ line, filterOptions, budgetLines, onSave, o
 
   return (
     <div className="modal-overlay">
+      {/* Modal de PIN para desbloquear P. Inicial */}
+      {showPinModal && (
+        <MasterPinUnlock
+          onUnlock={(success) => {
+            if (success) {
+              setInitialUnlocked(true);
+              sessionStorage.setItem('master_unlocked', 'true');
+            }
+            setShowPinModal(false);
+          }}
+          onClose={() => setShowPinModal(false)}
+        />
+      )}
+
       <div className="modal" onClick={e => e.stopPropagation()}>
         <div className="modal-header">
           <h2 className="modal-title">
@@ -493,19 +512,37 @@ export default function BudgetForm({ line, filterOptions, budgetLines, onSave, o
 
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: 16 }}>
                 <div style={{ flex: '1 1 30%', minWidth: '250px', display: 'flex', flexDirection: 'column', gap: 8, background: 'var(--bg-card)', padding: '12px', borderRadius: 4, border: '1px dashed var(--border-light)' }}>
-                  <span style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>Repartir en los 12 meses el Presupuesto <strong>Inicial</strong>: </span>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <span style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', flex: 1 }}>Repartir en los 12 meses el Presupuesto <strong>Inicial</strong>: </span>
+                    {!initialUnlocked ? (
+                      <button
+                        type="button"
+                        className="btn btn-outline btn-sm"
+                        onClick={() => setShowPinModal(true)}
+                        title="Desbloquear edición de P. Inicial"
+                        style={{ gap: 4, fontSize: '0.75rem' }}
+                      >
+                        <Lock style={{ width: 12, height: 12 }} /> Bloqueado
+                      </button>
+                    ) : (
+                      <span style={{ fontSize: '0.75rem', color: 'var(--success)', display: 'flex', alignItems: 'center', gap: 4 }}>
+                        <Unlock style={{ width: 12, height: 12 }} /> Desbloqueado
+                      </span>
+                    )}
+                  </div>
                   <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
                     <CurrencyInput
                       value={annualInitialInput}
                       onChange={setAnnualInitialInput}
                       placeholder="Total Anual"
+                      disabled={!initialUnlocked}
                     />
                     <button 
                       type="button" 
                       className="btn btn-primary btn-sm" 
                       onClick={handleDistributeInitial}
                       title="Dividir en 12 la columna inicial"
-                      disabled={!annualInitialInput}
+                      disabled={!annualInitialInput || !initialUnlocked}
                     >
                       <Calculator style={{ width: 14, height: 14, marginRight: 6 }} /> Distribuir
                     </button>
@@ -576,12 +613,30 @@ export default function BudgetForm({ line, filterOptions, budgetLines, onSave, o
                       <tr key={m.key}>
                         <td style={{ fontWeight: 500, color: 'var(--text-secondary)', fontSize: '0.8rem' }}>{m.label}</td>
                         <td>
-                          <CurrencyInput
-                            value={form[ogKey]}
-                            onChange={(val) => handleChange(ogKey, val)}
-                            id={`input-og-${m.key}`}
-                            placeholder="0"
-                          />
+                          {/* P. Inicial: bloqueado en líneas nuevas (siempre 0) y en existentes (hasta desbloquear con PIN) */}
+                          <div style={{ position: 'relative', display: 'flex', alignItems: 'center', gap: 4 }}>
+                            <CurrencyInput
+                              value={form[ogKey]}
+                              onChange={(val) => handleChange(ogKey, val)}
+                              id={`input-og-${m.key}`}
+                              placeholder="0"
+                              disabled={!initialUnlocked}
+                            />
+                            <button
+                              type="button"
+                              onClick={() => setShowPinModal(true)}
+                              title={initialUnlocked ? 'P. Inicial desbloqueado' : 'Clic para desbloquear edición del P. Inicial'}
+                              style={{
+                                background: 'none', border: 'none', cursor: initialUnlocked ? 'default' : 'pointer',
+                                color: initialUnlocked ? 'var(--success)' : 'var(--text-muted)', padding: 4, flexShrink: 0
+                              }}
+                            >
+                              {initialUnlocked
+                                ? <Unlock style={{ width: 13, height: 13 }} />
+                                : <Lock style={{ width: 13, height: 13 }} />
+                              }
+                            </button>
+                          </div>
                         </td>
                         <td>
                           <CurrencyInput

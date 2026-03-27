@@ -5,16 +5,34 @@ const config = require('../config');
 const supabase = createClient(config.supabase.url, config.supabase.key);
 
 /**
- * Get all active budget lines from Supabase (fetching master and details)
+ * Get active budget lines from Supabase (excludes 'eliminada').
+ * Used for KPI calculations — deleted lines do NOT count.
  */
 async function getAllBudgetLines() {
   const { data, error } = await supabase
     .from('budget_items')
     .select('*, budget_allocations(*)')
-    .eq('estado', 'activa');
+    .neq('estado', 'eliminada');
     
   if (error) {
     console.error('Error fetching budget lines from Supabase:', error);
+    throw error;
+  }
+  
+  return data;
+}
+
+/**
+ * Get ALL budget lines including deleted ones.
+ * Used for the detail table view where deleted lines are shown with a special style.
+ */
+async function getAllBudgetLinesIncludeDeleted() {
+  const { data, error } = await supabase
+    .from('budget_items')
+    .select('*, budget_allocations(*)');
+    
+  if (error) {
+    console.error('Error fetching all budget lines from Supabase:', error);
     throw error;
   }
   
@@ -277,6 +295,7 @@ function mapSupabaseToApp(row) {
 module.exports = {
   supabase,
   getAllBudgetLines,
+  getAllBudgetLinesIncludeDeleted,
   upsertBudgetLines,
   updateBudgetLine,
   deleteBudgetLine,

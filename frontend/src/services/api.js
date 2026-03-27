@@ -1,17 +1,13 @@
 const API_BASE = '/api';
 
-/**
- * Carga el archivo Excel por defecto en el backend.
- */
+/** Carga el archivo Excel por defecto en el backend. */
 export async function loadDefaultBudget() {
   const res = await fetch(`${API_BASE}/budget/load-default`, { method: 'POST' });
   if (!res.ok) throw new Error('Error al cargar presupuesto');
   return res.json();
 }
 
-/**
- * Sube un archivo Excel al backend.
- */
+/** Sube un archivo Excel al backend. */
 export async function uploadExcel(file, sheetName = 'Detalle') {
   const formData = new FormData();
   formData.append('file', file);
@@ -34,9 +30,7 @@ function buildQueryParams(filters) {
   return params;
 }
 
-/**
- * Obtiene los KPIs con filtros opcionales.
- */
+/** Obtiene los KPIs con filtros opcionales. */
 export async function getKPIs(filters = {}) {
   const params = buildQueryParams(filters);
   const res = await fetch(`${API_BASE}/budget/kpis?${params}`);
@@ -44,9 +38,7 @@ export async function getKPIs(filters = {}) {
   return res.json();
 }
 
-/**
- * Obtiene datos mensuales para gráficos.
- */
+/** Obtiene datos mensuales para gráficos. */
 export async function getMonthlyData(filters = {}) {
   const params = buildQueryParams(filters);
   const res = await fetch(`${API_BASE}/budget/monthly?${params}`);
@@ -54,9 +46,7 @@ export async function getMonthlyData(filters = {}) {
   return res.json();
 }
 
-/**
- * Obtiene el flujo semanal.
- */
+/** Obtiene el flujo semanal. */
 export async function getWeeklyFlow(filters = {}) {
   const params = buildQueryParams(filters);
   const res = await fetch(`${API_BASE}/budget/weekly-flow?${params}`);
@@ -64,9 +54,7 @@ export async function getWeeklyFlow(filters = {}) {
   return res.json();
 }
 
-/**
- * Obtiene las opciones de filtros.
- */
+/** Obtiene las opciones de filtros. */
 export async function getFilterOptions() {
   const res = await fetch(`${API_BASE}/budget/filters`);
   if (!res.ok) throw new Error('Error al obtener filtros');
@@ -75,17 +63,17 @@ export async function getFilterOptions() {
 
 /**
  * Obtiene las líneas de presupuesto con filtros.
+ * @param {Object} filters - Filtros a aplicar
+ * @param {boolean} includeDeleted - Si true, incluye líneas eliminadas
  */
-export async function getBudgetLines(filters = {}) {
-  const params = buildQueryParams(filters);
+export async function getBudgetLines(filters = {}, includeDeleted = false) {
+  const params = buildQueryParams({ ...filters, ...(includeDeleted ? { includeDeleted: true } : {}) });
   const res = await fetch(`${API_BASE}/budget?${params}`);
   if (!res.ok) throw new Error('Error al obtener líneas');
   return res.json();
 }
 
-/**
- * Crea una nueva línea de presupuesto.
- */
+/** Crea una nueva línea de presupuesto. */
 export async function createBudgetLine(data) {
   const res = await fetch(`${API_BASE}/budget`, {
     method: 'POST',
@@ -96,9 +84,7 @@ export async function createBudgetLine(data) {
   return res.json();
 }
 
-/**
- * Actualiza una línea de presupuesto.
- */
+/** Actualiza una línea de presupuesto. */
 export async function updateBudgetLine(id, data) {
   const res = await fetch(`${API_BASE}/budget/${id}`, {
     method: 'PUT',
@@ -109,18 +95,28 @@ export async function updateBudgetLine(id, data) {
   return res.json();
 }
 
-/**
- * Elimina una línea de presupuesto.
- */
-export async function deleteBudgetLine(id, physical = false) {
-  const res = await fetch(`${API_BASE}/budget/${id}?physical=${physical}`, { method: 'DELETE' });
+/** Eliminación lógica de una línea (estado='eliminada'). */
+export async function deleteBudgetLine(id, reason = '', physical = false) {
+  const res = await fetch(`${API_BASE}/budget/${id}?physical=${physical}`, {
+    method: 'DELETE',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ reason })
+  });
   if (!res.ok) throw new Error('Error al eliminar línea');
   return res.json();
 }
 
-/**
- * Exporta el reporte semanal en Excel.
- */
+/** Restaura una línea previamente eliminada. */
+export async function restoreBudgetLine(id) {
+  const res = await fetch(`${API_BASE}/budget/${id}/restore`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+  });
+  if (!res.ok) throw new Error('Error al restaurar línea');
+  return res.json();
+}
+
+/** Exporta el reporte semanal en Excel. */
 export async function exportWeeklyExcel(filters = {}) {
   const params = buildQueryParams(filters);
   const res = await fetch(`${API_BASE}/budget/export-weekly?${params}`, { method: 'GET' });
@@ -137,9 +133,7 @@ export async function exportWeeklyExcel(filters = {}) {
   window.URL.revokeObjectURL(url);
 }
 
-/**
- * Sincroniza movimientos desde Dolibarr.
- */
+/** Sincroniza movimientos desde Dolibarr. */
 export async function syncDolibarr(dolibarrConfig) {
   const res = await fetch(`${API_BASE}/budget/sync-dolibarr`, {
     method: 'POST',
@@ -147,5 +141,58 @@ export async function syncDolibarr(dolibarrConfig) {
     body: JSON.stringify({ dolibarrConfig }),
   });
   if (!res.ok) throw new Error('Error al sincronizar con Dolibarr');
+  return res.json();
+}
+
+// ==========================================
+// TRASLADOS DE PRESUPUESTO
+// ==========================================
+
+/** Lista todos los traslados de presupuesto. */
+export async function listTransfers() {
+  const res = await fetch(`${API_BASE}/budget/transfers/list`);
+  if (!res.ok) throw new Error('Error al obtener traslados');
+  return res.json();
+}
+
+/** Solicita un nuevo traslado (queda en estado 'pendiente'). */
+export async function createTransfer(fromId, toId, amounts, motivo) {
+  const res = await fetch(`${API_BASE}/budget/transfers`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ fromId, toId, amounts, motivo }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || 'Error al solicitar traslado');
+  }
+  return res.json();
+}
+
+/** Aprueba un traslado pendiente (requiere autenticación por PIN en el frontend). */
+export async function approveTransfer(transferId, approvedBy = 'Jhonatan Mejía') {
+  const res = await fetch(`${API_BASE}/budget/transfers/${transferId}/approve`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ approvedBy }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || 'Error al aprobar traslado');
+  }
+  return res.json();
+}
+
+/** Rechaza un traslado pendiente. */
+export async function rejectTransfer(transferId, reason = '') {
+  const res = await fetch(`${API_BASE}/budget/transfers/${transferId}/reject`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ reason }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || 'Error al rechazar traslado');
+  }
   return res.json();
 }

@@ -13,14 +13,15 @@ import WeeklyFlowChart from './components/WeeklyFlowChart';
 import DolibarrConfig from './components/DolibarrConfig';
 import ICGIToggle from './components/ICGIToggle';
 import BudgetFilters from './components/BudgetFilters';
+import BudgetTransfers from './components/BudgetTransfers';
 import {
   loadDefaultBudget, uploadExcel, getKPIs, getMonthlyData,
   getWeeklyFlow, getFilterOptions, getBudgetLines,
-  createBudgetLine, updateBudgetLine, deleteBudgetLine,
+  createBudgetLine, updateBudgetLine, deleteBudgetLine, restoreBudgetLine,
   exportWeeklyExcel, syncDolibarr
 } from './services/api';
 import { getCurrentWeek } from './utils/dateUtils';
-import { Save, RefreshCw, Settings, Download } from 'lucide-react';
+import { Save, RefreshCw, Settings, Download, Clock } from 'lucide-react';
 
 function App() {
   const [currentView, setCurrentView] = useState('dashboard');
@@ -28,18 +29,23 @@ function App() {
   const [monthlyData, setMonthlyData] = useState([]);
   const [weeklyData, setWeeklyData] = useState([]);
   const [filterOptions, setFilterOptions] = useState({});
-  const [budgetLines, setBudgetLines] = useState([]);
-  const [allBudgetLines, setAllBudgetLines] = useState([]);
+  const [budgetLines, setBudgetLines] = useState([]);       // Líneas activas (filtradas)
+  const [allBudgetLines, setAllBudgetLines] = useState([]); // Todas las líneas (para form)
   const [eerrLines, setEerrLines] = useState([]);
   const [filters, setFilters] = useState({ escenario: [1] });
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
   const [editingLine, setEditingLine] = useState(null);
+  const [lineToDelete, setLineToDelete] = useState(null);
+  const [deleteReason, setDeleteReason] = useState('');
   const [notification, setNotification] = useState(null);
   const [isProcessing, setIsProcessing] = useState(false);
   const [weeklyOptions, setWeeklyOptions] = useState({ displayWeeks: 12, filterEERR: false });
+  // Estado para mostrar líneas eliminadas en la tabla de detalle
+  const [showDeleted, setShowDeleted] = useState(false);
+  // Timestamp de última sincronización con Dolibarr
+  const [lastSync, setLastSync] = useState(() => localStorage.getItem('lastDolibarrSync') || null);
 
-  // Efecto para el cursor de carga global
   useEffect(() => {
     document.body.classList.toggle('processing', isProcessing);
   }, [isProcessing]);
@@ -49,6 +55,10 @@ function App() {
     setTimeout(() => setNotification(null), 4000);
   };
 
+  /**
+   * Carga principal de dashboard: KPIs, datos mensuales y opciones de filtro en paralelo.
+   * Reducción de round-trips agrupando llamadas en Promise.all.
+   */
   const loadData = useCallback(async (currentFilters = {}) => {
     setIsProcessing(true);
     try {
@@ -67,10 +77,14 @@ function App() {
     }
   }, []);
 
-  const loadLines = useCallback(async (currentFilters = {}) => {
+  /**
+   * Carga líneas para la tabla de detalle.
+   * Si showDeleted es true, incluye líneas eliminadas.
+   */
+  const loadLines = useCallback(async (currentFilters = {}, includeDeleted = false) => {
     setIsProcessing(true);
     try {
-      const lines = await getBudgetLines(currentFilters);
+      const lines = await getBudgetLines(currentFilters, includeDeleted);
       setBudgetLines(lines);
     } catch (err) {
       console.error('Error cargando líneas:', err);
@@ -79,31 +93,30 @@ function App() {
     }
   }, []);
 
+  /**
+   * Carga TODAS las líneas activas (sin filtros) para el formulario de selección.
+   * No incluye eliminadas para no contaminar el selector de líneas base.
+   */
   const loadAllLines = useCallback(async () => {
-    setIsProcessing(true);
     try {
-      const lines = await getBudgetLines({});
+      const lines = await getBudgetLines({}, false);
       setAllBudgetLines(lines);
     } catch (err) {
       console.error('Error cargando todas las líneas:', err);
-    } finally {
-      setIsProcessing(false);
     }
   }, []);
 
   const loadEerrLines = useCallback(async (escenarioFilter) => {
-    setIsProcessing(true);
     try {
       const eerrFilter = {};
       if (escenarioFilter && (Array.isArray(escenarioFilter) ? escenarioFilter.length > 0 : true)) {
         eerrFilter.escenario = escenarioFilter;
       }
-      const lines = await getBudgetLines(eerrFilter);
+      // SOLICITAR líneas eliminadas para que EERRSummary recupere su P. Inicial
+      const lines = await getBudgetLines(eerrFilter, true);
       setEerrLines(lines);
     } catch (err) {
       console.error('Error cargando líneas EERR:', err);
-    } finally {
-      setIsProcessing(false);
     }
   }, []);
 
@@ -124,15 +137,16 @@ function App() {
     const init = async () => {
       setLoading(true);
       try {
-        // Intentar cargar presupuesto base/defecto (puede omitirse si ya hay datos en Supabase)
         await loadDefaultBudget().catch(e => console.warn('Omitiendo carga inicial:', e.message));
-        await loadData({});
-        await loadLines({});
-        await loadAllLines();
-        await loadEerrLines([1]); // Default escenario
+        // Cargar todo en paralelo para mayor velocidad
+        await Promise.all([
+          loadData({}),
+          loadLines({}, false),
+          loadAllLines(),
+          loadEerrLines([1]),
+        ]);
       } catch (error) {
         console.error('Error inicializando:', error);
-        // Solo alertar si falla la carga de datos (loadData)
         if (error.message.includes('servidor')) {
           alert('Error al conectar con el servidor. Por favor verifica tu conexión.');
         }
@@ -146,10 +160,13 @@ function App() {
   // Recargar datos al cambiar filtros
   useEffect(() => {
     if (!loading) {
-      loadData(filters);
-      loadLines(filters);
+      // Cargar datos del dashboard y líneas en paralelo
+      Promise.all([
+        loadData(filters),
+        loadLines(filters, showDeleted),
+      ]);
     }
-  }, [filters, loading, loadData, loadLines]);
+  }, [filters, loading, loadData, loadLines, showDeleted]);
 
   // Recargar EERR solo cuando cambia el escenario
   useEffect(() => {
@@ -170,7 +187,6 @@ function App() {
   };
 
   const handleChartClick = (filterType, value) => {
-    // Special handling: clicking a month on the chart switches to detail view
     if (filterType === 'mes') {
       setCurrentView('detalle');
       handleFilterChange({ ...filters, mes: value });
@@ -204,9 +220,11 @@ function App() {
     setIsProcessing(true);
     try {
       await loadDefaultBudget();
-      await loadData(filters);
-      await loadLines(filters);
-      await loadAllLines();
+      await Promise.all([
+        loadData(filters),
+        loadLines(filters, showDeleted),
+        loadAllLines(),
+      ]);
       showNotification('Datos actualizados desde el Excel');
     } catch (err) {
       showNotification(err.message, 'error');
@@ -219,9 +237,7 @@ function App() {
     setIsProcessing(true);
     try {
       const result = await uploadExcel(file);
-      await loadData({});
-      await loadLines({});
-      await loadAllLines();
+      await Promise.all([loadData({}), loadLines({}, false), loadAllLines()]);
       showNotification(result.message);
       return result;
     } finally {
@@ -230,36 +246,66 @@ function App() {
   };
 
   const handleCreate = () => {
-    if (allBudgetLines.length === 0) {
-      loadAllLines();
-    }
+    if (allBudgetLines.length === 0) loadAllLines();
     setEditingLine(null);
     setShowForm(true);
   };
 
   const handleEdit = (line) => {
-    if (allBudgetLines.length === 0) {
-      loadAllLines();
-    }
+    if (allBudgetLines.length === 0) loadAllLines();
     setEditingLine(line);
     setShowForm(true);
   };
 
-  const handleDelete = async (line) => {
-    // Para depurar si el window.confirm era el causante del bloqueo, lo removemos temporalmente.
-    // if (!window.confirm(`¿Eliminar la línea "${line.nombreElemento}"?`)) return;
+  /**
+   * Dispara el modal de confirmación de eliminación lógica.
+   */
+  const handleDelete = (line) => {
+    setLineToDelete(line);
+    setDeleteReason('');
+  };
+
+  /**
+   * Ejecuta la eliminación lógica con un motivo.
+   */
+  const confirmDelete = async () => {
+    if (!deleteReason.trim()) {
+      showNotification('El motivo de eliminación es obligatorio', 'error');
+      return;
+    }
     setIsProcessing(true);
     try {
-      await deleteBudgetLine(line.id_linea);
-      showNotification('Línea eliminada correctamente');
-      await loadData(filters);
-      await loadLines(filters);
-      await loadAllLines();
+      await deleteBudgetLine(lineToDelete.id_linea, deleteReason.trim());
+      showNotification(`Línea "${lineToDelete.nombreElemento}" marcada como eliminada.`);
+      setLineToDelete(null);
+      await Promise.all([loadData(filters), loadLines(filters, showDeleted), loadAllLines()]);
     } catch (err) {
       showNotification(err.message, 'error');
     } finally {
       setIsProcessing(false);
     }
+  };
+
+  /**
+   * Restaura una línea previamente eliminada.
+   */
+  const handleRestore = async (line) => {
+    setIsProcessing(true);
+    try {
+      await restoreBudgetLine(line.id_linea);
+      showNotification(`Línea "${line.nombreElemento}" restaurada correctamente.`);
+      await Promise.all([loadData(filters), loadLines(filters, showDeleted), loadAllLines()]);
+    } catch (err) {
+      showNotification(err.message, 'error');
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  const handleToggleShowDeleted = () => {
+    const newShowDeleted = !showDeleted;
+    setShowDeleted(newShowDeleted);
+    loadLines(filters, newShowDeleted);
   };
 
   const handleSave = async (formData) => {
@@ -274,9 +320,7 @@ function App() {
       }
       setShowForm(false);
       setEditingLine(null);
-      await loadData(filters);
-      await loadLines(filters);
-      await loadAllLines();
+      await Promise.all([loadData(filters), loadLines(filters, showDeleted), loadAllLines()]);
     } catch (err) {
       showNotification(err.message, 'error');
     } finally {
@@ -288,17 +332,14 @@ function App() {
     setIsProcessing(true);
     try {
       showNotification('Generando Excel, por favor espera...', 'success');
-      
       const currentWeek = getCurrentWeek();
       const effectiveStartWeek = weeklyOptions.startWeek === 'current' ? currentWeek : parseInt(weeklyOptions.startWeek);
-      
       const options = {
         startWeek: effectiveStartWeek,
         endWeek: Math.min(52, effectiveStartWeek + weeklyOptions.displayWeeks - 1),
         simplified: true,
         filterEERR: weeklyOptions.filterEERR
       };
-      
       await exportWeeklyExcel({ ...filters, ...options });
       showNotification('Archivo exportado correctamente.');
     } catch (err) {
@@ -310,23 +351,19 @@ function App() {
 
   const handleExportLines = () => {
     try {
-      if (budgetLines.length === 0) {
-        showNotification('No hay líneas para exportar', 'error');
-        return;
-      }
+      const activeLines = budgetLines.filter(l => l.estado !== 'eliminada');
+      if (activeLines.length === 0) { showNotification('No hay líneas para exportar', 'error'); return; }
       
       const headers = ['ID', 'Nombre del Elemento', 'Total Presupuesto'];
-      const rows = budgetLines.map(line => [
+      const rows = activeLines.map(line => [
         `#${line.idConsecutivo}`,
         line.nombreElemento,
         line.total.toLocaleString('es-CL', { minimumFractionDigits: 0 })
       ]);
-
       const csvContent = [
         headers.join(';'),
         ...rows.map(row => row.map(cell => `"${(cell || '').replace(/"/g, '""')}"`).join(';'))
       ].join('\n');
-
       const blob = new Blob(['\ufeff' + csvContent], { type: 'text/csv;charset=utf-8;' });
       const url = URL.createObjectURL(blob);
       const link = document.createElement('a');
@@ -343,17 +380,34 @@ function App() {
     }
   };
 
+  /**
+   * Sincroniza con Dolibarr y guarda el timestamp de última sincronización.
+   */
   const handleSync = async (config) => {
     setIsProcessing(true);
     try {
       const result = await syncDolibarr(config);
-      await loadData(filters);
-      await loadLines(filters);
-      await loadAllLines();
+      const now = new Date().toISOString();
+      setLastSync(now);
+      localStorage.setItem('lastDolibarrSync', now);
+      await Promise.all([loadData(filters), loadLines(filters, showDeleted), loadAllLines()]);
       return result;
     } finally {
       setIsProcessing(false);
     }
+  };
+
+  const formatLastSync = (ts) => {
+    if (!ts) return null;
+    const date = new Date(ts);
+    const now = new Date();
+    const diffMs = now - date;
+    const diffMins = Math.floor(diffMs / 60000);
+    if (diffMins < 1) return 'hace menos de 1 min';
+    if (diffMins < 60) return `hace ${diffMins} min`;
+    const diffHours = Math.floor(diffMins / 60);
+    if (diffHours < 24) return `hace ${diffHours} h`;
+    return date.toLocaleDateString('es-CO', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
   };
 
   const renderView = () => {
@@ -381,7 +435,7 @@ function App() {
               />
             </div>
 
-            {/* Tabla resumen por área */}
+            {/* Tabla resumen por área con columnas Inicial / Actual */}
             {kpis?.byArea && (
               <div className="table-card" style={{ marginTop: 4 }}>
                 <div className="table-header">
@@ -392,40 +446,52 @@ function App() {
                     <thead>
                       <tr>
                         <th>Área</th>
-                        <th style={{ textAlign: 'right' }}>Presupuesto</th>
-                        <th style={{ textAlign: 'right' }}>Ejecutado</th>
+                        <th style={{ textAlign: 'right' }}>P. Inicial</th>
+                        <th style={{ textAlign: 'right' }}>P. Actual</th>
                         <th style={{ textAlign: 'right' }}>Diferencia</th>
-                        <th>% Ejecución</th>
+                        <th style={{ textAlign: 'right' }}>Ejecutado</th>
+                        <th>% Ejec. Actual</th>
+                        <th>% Ejec. Inicial</th>
                       </tr>
                     </thead>
                     <tbody>
                       {Object.entries(kpis.byArea)
                         .sort(([, a], [, b]) => b.presupuesto - a.presupuesto)
                         .map(([area, val]) => {
-                          const diff = val.presupuesto - val.ejecutado;
-                          const pct = val.presupuesto > 0 ? (val.ejecutado / val.presupuesto) * 100 : 0;
-                          const barColor = pct > 100 ? 'red' : pct > 75 ? 'yellow' : pct > 0 ? 'teal' : 'green';
+                          const diff = (val.presupuestoInicial || 0) - (val.presupuesto || 0);
+                          const pctActual = val.presupuesto > 0 ? (val.ejecutado / val.presupuesto) * 100 : 0;
+                          const pctInicial = (val.presupuestoInicial || 0) > 0 ? (val.ejecutado / (val.presupuestoInicial || 0)) * 100 : 0;
+                          const barColorActual = pctActual > 100 ? 'red' : pctActual > 75 ? 'yellow' : pctActual > 0 ? 'teal' : 'green';
+                          const barColorInicial = pctInicial > 100 ? 'red' : pctInicial > 75 ? 'yellow' : pctInicial > 0 ? 'teal' : 'green';
                           return (
                             <tr key={area}>
                               <td style={{ fontWeight: 500 }}>{area}</td>
+                              <td className="amount-cell" style={{ color: 'var(--text-muted)' }}>
+                                ${((val.presupuestoInicial || 0) / 1_000_000).toFixed(1)}M
+                              </td>
                               <td className="amount-cell">
                                 ${(val.presupuesto / 1_000_000).toFixed(1)}M
+                              </td>
+                              <td className={`amount-cell ${diff >= 0 ? 'amount-positive' : 'amount-negative'}`}>
+                                {diff >= 0 ? '' : '-'}${(Math.abs(diff) / 1_000_000).toFixed(1)}M
                               </td>
                               <td className="amount-cell">
                                 ${(val.ejecutado / 1_000_000).toFixed(1)}M
                               </td>
-                              <td className={`amount-cell ${diff >= 0 ? 'amount-positive' : 'amount-negative'}`}>
-                                ${(diff / 1_000_000).toFixed(1)}M
+                              <td>
+                                <div className="progress-bar-wrapper">
+                                  <div className="progress-bar">
+                                    <div className={`progress-bar-fill ${barColorActual}`} style={{ width: `${Math.min(pctActual, 100)}%` }} />
+                                  </div>
+                                  <span className="progress-text">{pctActual.toFixed(0)}%</span>
+                                </div>
                               </td>
                               <td>
                                 <div className="progress-bar-wrapper">
                                   <div className="progress-bar">
-                                    <div
-                                      className={`progress-bar-fill ${barColor}`}
-                                      style={{ width: `${Math.min(pct, 100)}%` }}
-                                    />
+                                    <div className={`progress-bar-fill ${barColorInicial}`} style={{ width: `${Math.min(pctInicial, 100)}%` }} />
                                   </div>
-                                  <span className="progress-text">{pct.toFixed(0)}%</span>
+                                  <span className="progress-text">{pctInicial.toFixed(0)}%</span>
                                 </div>
                               </td>
                             </tr>
@@ -447,6 +513,9 @@ function App() {
             onEdit={handleEdit}
             onDelete={handleDelete}
             onCreate={handleCreate}
+            onRestore={handleRestore}
+            showDeleted={showDeleted}
+            onToggleShowDeleted={handleToggleShowDeleted}
           />
         );
 
@@ -461,11 +530,22 @@ function App() {
           />
         );
 
+      case 'traslados':
+        return (
+          <BudgetTransfers
+            budgetLines={allBudgetLines}
+            onTransferComplete={async () => {
+              await Promise.all([loadData(filters), loadLines(filters, showDeleted), loadAllLines()]);
+              showNotification('Traslados actualizados');
+            }}
+          />
+        );
+
       case 'importar':
         return <FileUpload onUpload={handleUpload} />;
 
       case 'dolibarr':
-        return <DolibarrConfig onSync={handleSync} />;
+        return <DolibarrConfig onSync={handleSync} lastSync={lastSync} />;
 
       case 'configuracion':
         return (
@@ -480,6 +560,7 @@ function App() {
               <li><strong>DOLIBARR_URL</strong>: URL base de Dolibarr</li>
               <li><strong>DOLIBARR_API_KEY</strong>: API Key de Dolibarr</li>
               <li><strong>DOLIBARR_YEAR</strong>: Año de filtro (default: 2026)</li>
+              <li><strong>VITE_MASTER_PIN</strong>: PIN para desbloquear edición del Presupuesto Inicial</li>
             </ul>
           </div>
         );
@@ -493,7 +574,7 @@ function App() {
     return (
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100vh', background: 'var(--bg-primary)' }}>
         <div style={{ textAlign: 'center' }}>
-          <img src="/logo.png" alt="Logo" style={{ width: 64, height: 64, marginBottom: 16 }} />
+          <img src="/logo.png" alt="Logo" style={{ width: 128, height: 128, marginBottom: 16 }} />
           <div className="spinner" style={{ margin: '0 auto' }} />
           <p style={{ marginTop: 16, color: 'var(--text-secondary)' }}>Cargando presupuesto...</p>
         </div>
@@ -506,12 +587,18 @@ function App() {
       <Sidebar currentView={currentView} onNavigate={setCurrentView} />
 
       <div className="main-content">
-        {/* Header */}
         <header className="header">
           <div className="header-title">
             <span>Tablero de Presupuesto</span> — Año 2026
           </div>
           <div className="header-actions">
+            {/* Última sincronización con Dolibarr */}
+            {lastSync && (
+              <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: 4 }}>
+                <Clock style={{ width: 12, height: 12 }} />
+                Sync: {formatLastSync(lastSync)}
+              </span>
+            )}
             <button className="btn btn-outline btn-sm" onClick={handleRefresh}>
               <RefreshCw style={{ width: 14, height: 14 }} /> Actualizar
             </button>
@@ -528,16 +615,13 @@ function App() {
           </div>
         </header>
 
-        {/* Contenido */}
         <main className="page-content">
-          {/* Notification */}
           {notification && (
             <div className={`alert alert-${notification.type === 'error' ? 'error' : 'success'}`}>
               {notification.message}
             </div>
           )}
 
-          {/* Filtros globales para vistas de datos */}
           {['dashboard', 'detalle', 'semanal'].includes(currentView) && (
             <BudgetFilters 
               filters={filters} 
@@ -550,7 +634,6 @@ function App() {
         </main>
       </div>
 
-      {/* Modal de formulario */}
       {showForm && (
         <BudgetForm
           line={editingLine}
@@ -559,6 +642,33 @@ function App() {
           onSave={handleSave}
           onClose={() => { setShowForm(false); setEditingLine(null); }}
         />
+      )}
+
+      {lineToDelete && (
+        <div className="modal-overlay" style={{ zIndex: 10000 }}>
+          <div className="modal-content" style={{ maxWidth: 400, padding: 24 }}>
+            <h3 style={{ marginBottom: 12, display: 'flex', alignItems: 'center', gap: 8 }}>
+              Confirmar Eliminación
+            </h3>
+            <p style={{ fontSize: '0.95rem', color: 'var(--text-secondary)' }}>
+              Por favor, justifica la eliminación de la línea <strong>{lineToDelete.nombreElemento}</strong>.
+            </p>
+            <textarea
+              className="input-field"
+              value={deleteReason}
+              onChange={e => setDeleteReason(e.target.value)}
+              placeholder="Ej: Cancelación de evento, error de digitación..."
+              rows={3}
+              style={{ width: '100%', marginTop: 12, marginBottom: 20 }}
+            />
+            <div className="form-actions" style={{ justifyContent: 'flex-end', gap: 8 }}>
+              <button className="btn btn-outline" onClick={() => setLineToDelete(null)}>Cancelar</button>
+              <button className="btn" style={{ background: 'var(--danger)', color: 'white' }} onClick={confirmDelete} disabled={!deleteReason.trim()}>
+                Eliminar Línea
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );
