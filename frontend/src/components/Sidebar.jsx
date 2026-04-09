@@ -65,5 +65,6 @@ export default function Sidebar({ currentView, onNavigate, isCollapsed, isMobile
         <span style={{ fontSize: '0.65rem', opacity: 0.5 }}>v1.2.0-mejoras</span>
       </div>
     </aside>
+    </>
   );
 }
