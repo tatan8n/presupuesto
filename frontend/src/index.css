@@ -984,3 +984,102 @@ body.processing, body.processing * {
     grid-template-columns: repeat(2, 1fr);
   }
 }
+
+/* ==============================
+   RESPONSIVE Y COLLAPSIBLE SIDEBAR
+   ============================== */
+
+/* PC Collapsed State */
+.sidebar.collapsed { width: var(--sidebar-collapsed); }
+.main-content.collapsed { margin-left: var(--sidebar-collapsed); }
+.header.collapsed { left: var(--sidebar-collapsed); }
+
+.sidebar.collapsed .sidebar-brand,
+.sidebar.collapsed .sidebar-section-title,
+.sidebar.collapsed .sidebar-item-label,
+.sidebar.collapsed .sidebar-footer {
+  display: none;
+}
+
+.sidebar.collapsed .sidebar-header {
+  padding: 16px 0;
+  justify-content: center;
+}
+
+.sidebar.collapsed .sidebar-logo {
+  width: 40px;
+  height: 40px;
+}
+
+.sidebar.collapsed .sidebar-nav {
+  align-items: center;
+}
+
+.sidebar.collapsed .sidebar-item {
+  justify-content: center;
+  padding: 12px;
+}
+
+/* Mobile Responsive */
+@media (max-width: 768px) {
+  /* Sidebar Overlay Behavior */
+  .sidebar {
+    transform: translateX(-100%);
+    z-index: 1000;
+  }
+  
+  .sidebar.mobile-open {
+    transform: translateX(0);
+  }
+  
+  .sidebar.collapsed {
+    /* En movil, el colapsado real es estar oculto a menos que se abra */
+    width: var(--sidebar-width); 
+  }
+
+  /* Main & Header full width */
+  .main-content, .main-content.collapsed { margin-left: 0; }
+  .header, .header.collapsed { left: 0; padding: 0 16px; }
+
+  /* Ajuste de grids para apilar */
+  .kpi-grid, 
+  .charts-grid,
+  .charts-grid-3,
+  .form-grid,
+  .form-grid-3,
+  .form-grid-4 {
+    grid-template-columns: 1fr;
+    gap: 16px;
+  }
+
+  /* Títulos más pequeños en header */
+  .header-title { font-size: 0.95rem; }
+  
+  /* Modal responsive */
+  .modal {
+    width: 100%;
+    height: 100vh;
+    max-height: 100vh;
+    border-radius: 0;
+  }
+  
+  /* Ajuste a botones/filtros */
+  .filters-bar { flex-direction: column; align-items: stretch; }
+  .filter-select, .filter-input { width: 100%; }
+}
+
+/* Modal form inputs wrapper override para no estirarse tanto si la pantalla es chica */
+@media (max-width: 768px) {
+  .form-group > div[style*="display: flex"] {
+    flex-direction: column;
+  }
+  .form-group > div[style*="display: flex"] > div {
+    width: 100% !important;
+  }
+}
+
+
+@media (max-width: 768px) {
+  .hide-on-mobile { display: none !important; }
+}
+

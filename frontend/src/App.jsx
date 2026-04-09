@@ -21,7 +21,7 @@ import {
   exportWeeklyExcel, syncDolibarr
 } from './services/api';
 import { getCurrentWeek } from './utils/dateUtils';
-import { Save, RefreshCw, Settings, Download, Clock } from 'lucide-react';
+import { Save, RefreshCw, Settings, Download, Clock, Menu } from 'lucide-react';
 
 function App() {
   const [currentView, setCurrentView] = useState('dashboard');
@@ -47,6 +47,20 @@ function App() {
   const [lastSync, setLastSync] = useState(() => localStorage.getItem('lastDolibarrSync') || null);
   // Ref para el intervalo de auto-sync (persiste entre renders y navegación de vistas)
   const autoSyncIntervalRef = useRef(null);
+
+  // Estados visuales para layout responsive
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+
+  useEffect(() => {
+    const handleResize = () => {
+      if (window.innerWidth > 768 && isMobileMenuOpen) {
+        setIsMobileMenuOpen(false);
+      }
+    };
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, [isMobileMenuOpen]);
 
   /**
    * Configura el auto-sync de Dolibarr a nivel de App para que funcione
@@ -644,12 +658,31 @@ function App() {
 
   return (
     <div className="app-layout">
-      <Sidebar currentView={currentView} onNavigate={setCurrentView} />
+      <Sidebar 
+        currentView={currentView} 
+        onNavigate={setCurrentView} 
+        isCollapsed={isSidebarCollapsed}
+        isMobileOpen={isMobileMenuOpen}
+        onCloseMobile={() => setIsMobileMenuOpen(false)}
+      />
 
-      <div className="main-content">
-        <header className="header">
+      <div className={`main-content ${isSidebarCollapsed ? 'collapsed' : ''}`}>
+        <header className={`header ${isSidebarCollapsed ? 'collapsed' : ''}`}>
           <div className="header-title">
-            <span>Tablero de Presupuesto</span> — Año 2026
+            <button 
+              className="btn btn-ghost btn-icon" 
+              onClick={() => {
+                if (window.innerWidth <= 768) {
+                  setIsMobileMenuOpen(!isMobileMenuOpen);
+                } else {
+                  setIsSidebarCollapsed(!isSidebarCollapsed);
+                }
+              }}
+              style={{ marginRight: 8, padding: 4 }}
+            >
+              <Menu style={{ width: 22, height: 22 }} />
+            </button>
+            <span style={{ whiteSpace: 'nowrap' }}>Tablero de Presupuesto</span> <span className="hide-on-mobile" style={{ marginLeft: 6 }}>— Año 2026</span>
           </div>
           <div className="header-actions">
             {/* Última sincronización con Dolibarr */}
