@@ -1,5 +1,5 @@
 const { readBudgetFromExcel, writeBudgetToExcel, generateWeeklyCashFlowExcel } = require('../repositories/excelRepository');
-const { fetchInvoices, fetchPurchaseOrders } = require('../repositories/dolibarrRepository');
+const { fetchInvoices, fetchPurchaseOrders, fetchExpenseReports } = require('../repositories/dolibarrRepository');
 const { createBudgetLine, recalculateLine } = require('../models/BudgetLine');
 const { createMovement } = require('../models/Movement');
 const crypto = require('crypto');
@@ -213,6 +213,17 @@ async function getBudgetLines(filters = {}) {
     });
   }
 
+  // Filtro especial: costos, gastos fijos e inversiones SIN salarios
+  if (cleanFilters.excludeSalarios === 'true' || cleanFilters.excludeSalarios === true) {
+    result = result.filter(line => {
+      const isIngreso = (line.cuenta || '').startsWith('01');
+      const cc = (line.cuentaContable || '').toLowerCase();
+      const isSalary = cc.includes('salario') || cc.includes('sueldo');
+      const isExtra = cc.includes('comision') || cc.includes('bonificacion') || cc.includes('industria y comercio') || cc.includes('compra implemento');
+      return !isIngreso && !isSalary && !isExtra;
+    });
+  }
+
   return result;
 }
 
@@ -272,6 +283,7 @@ async function createLine(data) {
     icgi: data.icgi || '',
     porcentaje: data.porcentaje || '',
     linea: data.linea || '',
+    tipoComportamiento: data.tipoComportamiento || 'Normal',
     ejecutadoAcumulado: 0,
     saldo: 0,
     estado: 'activa',
@@ -301,7 +313,7 @@ async function updateLine(id, data) {
     'fechaJulio', 'fechaAgosto', 'fechaSeptiembre', 'fechaOctubre', 'fechaNoviembre', 'fechaDiciembre',
     'lineaEnero', 'lineaFebrero', 'lineaMarzo', 'lineaAbril', 'lineaMayo', 'lineaJunio',
     'lineaJulio', 'lineaAgosto', 'lineaSeptiembre', 'lineaOctubre', 'lineaNoviembre', 'lineaDiciembre',
-    'icgi', 'porcentaje', 'linea', 'observaciones'
+    'icgi', 'porcentaje', 'linea', 'observaciones', 'tipoComportamiento'
   ];
 
   updatableFields.forEach(field => {
@@ -546,14 +558,16 @@ async function syncDolibarr(dolibarrConfig) {
   log(`[Sync] Starting sync for year: ${cfg.year} with URL: ${cfg.url}`);
 
   try {
-    log('[Sync] Calling fetchInvoices...');
-    const [invoices, orders] = await Promise.all([
+    log('[Sync] Calling fetchInvoices, fetchPurchaseOrders, fetchExpenseReports...');
+    const [invoices, orders, expenseReports] = await Promise.all([
       fetchInvoices(cfg),
       fetchPurchaseOrders(cfg),
+      fetchExpenseReports(cfg),
     ]);
 
     log(`[Sync] Invoices fetched: ${invoices.length}`);
     log(`[Sync] Orders fetched: ${orders.length}`);
+    log(`[Sync] Expense reports fetched: ${expenseReports.length}`);
 
     if (invoices.length > 0) {
       log(`[Sync] Sample invoice ref: ${invoices[0].ref}, options: ${JSON.stringify(invoices[0].array_options)}`);
@@ -572,39 +586,79 @@ async function syncDolibarr(dolibarrConfig) {
 
     const newMovements = [];
 
+    // Helper: extrae el id_linea_presupuesto de un documento (factura, orden o informe)
+    const extractBudgetLineId = (doc) => {
+      // Buscar en array_options a nivel de cabecera
+      if (doc.array_options?.options_ppto) return String(doc.array_options.options_ppto);
+      // Buscar en las líneas del documento
+      if (doc.lines) {
+        for (const line of doc.lines) {
+          if (line.array_options?.options_ppto) return String(line.array_options.options_ppto);
+        }
+      }
+      return '';
+    };
+
+    // --- Facturas de proveedor ---
     invoices.forEach(inv => {
       const mov = createMovement({ ...inv, tipo_documento: 'factura_proveedor' });
-      if (!mov.id_linea_presupuesto && inv.lines) {
-        inv.lines.forEach(line => {
-          if (line.array_options && line.array_options.options_ppto) {
-            mov.id_linea_presupuesto = line.array_options.options_ppto;
-          }
-        });
-      }
-
-      if (mov.id_linea_presupuesto && idMap[String(mov.id_linea_presupuesto)]) {
-        mov.id_linea_presupuesto_uuid = idMap[String(mov.id_linea_presupuesto)];
+      if (!mov.id_linea_presupuesto) mov.id_linea_presupuesto = extractBudgetLineId(inv);
+      if (mov.id_linea_presupuesto && idMap[mov.id_linea_presupuesto]) {
+        mov.id_linea_presupuesto_uuid = idMap[mov.id_linea_presupuesto];
         newMovements.push(mov);
       }
     });
 
+    // --- Órdenes de compra ---
     orders.forEach(ord => {
       const mov = createMovement({ ...ord, tipo_documento: 'orden_compra' });
-      if (!mov.id_linea_presupuesto && ord.lines) {
-        ord.lines.forEach(line => {
-          if (line.array_options && line.array_options.options_ppto) {
-            mov.id_linea_presupuesto = line.array_options.options_ppto;
-          }
-        });
+      if (!mov.id_linea_presupuesto) mov.id_linea_presupuesto = extractBudgetLineId(ord);
+      if (mov.id_linea_presupuesto && idMap[mov.id_linea_presupuesto]) {
+        mov.id_linea_presupuesto_uuid = idMap[mov.id_linea_presupuesto];
+        newMovements.push(mov);
       }
+    });
 
-      if (mov.id_linea_presupuesto && idMap[String(mov.id_linea_presupuesto)]) {
-        mov.id_linea_presupuesto_uuid = idMap[String(mov.id_linea_presupuesto)];
+    // --- Informes de gastos (expense reports) ---
+    expenseReports.forEach(rep => {
+      // Los informes de gastos usan date_create como fecha y total_ttc como monto
+      const mov = createMovement({
+        ...rep,
+        tipo_documento: 'informe_gastos',
+        // Mapear campos específicos de expense reports
+        datef: rep.date_create || rep.datef || '',
+        total_ttc: rep.total_ttc || rep.total || 0,
+        socname: rep.user_author || rep.nom || '',
+      });
+      if (!mov.id_linea_presupuesto) mov.id_linea_presupuesto = extractBudgetLineId(rep);
+      if (mov.id_linea_presupuesto && idMap[mov.id_linea_presupuesto]) {
+        mov.id_linea_presupuesto_uuid = idMap[mov.id_linea_presupuesto];
         newMovements.push(mov);
       }
     });
 
     movements = newMovements;
+
+    // Persistir movimientos en Supabase para que la gráfica mensual use fechas reales
+    try {
+      const movsParaSupabase = newMovements.map(m => ({
+        id: `${m.tipo_documento}_${m.id_movimiento}`,
+        id_linea_presupuesto_uuid: m.id_linea_presupuesto_uuid,
+        fecha_documento: m.fecha_documento
+          ? (() => { const d = new Date(m.fecha_documento * 1000); return isNaN(d) ? m.fecha_documento : d.toISOString().slice(0, 10); })()
+          : null,
+        tipo_documento: m.tipo_documento,
+        proveedor: m.proveedor,
+        monto: m.monto,
+        moneda: m.moneda,
+        estado_documento: String(m.estado_documento || ''),
+        ref: m.id_movimiento,
+      }));
+      await supabaseRepository.upsertMovements(movsParaSupabase);
+      log(`[Sync] ${movsParaSupabase.length} movimientos persistidos en Supabase.`);
+    } catch (e) {
+      log(`[Sync] Advertencia: no se pudo persistir movimientos en Supabase: ${e.message}`);
+    }
 
     const ejecutadoPorLinea = {};
     movements.forEach(m => {
@@ -632,6 +686,7 @@ async function syncDolibarr(dolibarrConfig) {
       fecha: new Date().toISOString(),
       facturas: invoices.length,
       ordenes: orders.length,
+      informesGastos: expenseReports.length,
       movimientosVinculados: newMovements.length,
     };
     syncLog.push(logEntry);
@@ -676,6 +731,21 @@ async function getSyncLog() {
 async function getMonthlyData(filters = {}) {
   const lines = await getBudgetLines({ ...filters, includeDeleted: true });
 
+  // Obtener movimientos persistidos en Supabase para calcular ejecutado real por mes
+  let movimientosPorMes = {};
+  try {
+    const year = config.dolibarr?.year || '2026';
+    const movs = await supabaseRepository.getMovements(year);
+    movs.forEach(mov => {
+      if (!mov.fecha_documento) return;
+      const mesNum = new Date(mov.fecha_documento).getMonth(); // 0-based
+      movimientosPorMes[mesNum] = (movimientosPorMes[mesNum] || 0) + (parseFloat(mov.monto) || 0);
+    });
+  } catch (e) {
+    // Si falla, el ejecutado queda en 0 (no interrumpe el flujo)
+    console.warn('[getMonthlyData] No se pudo leer movimientos:', e.message);
+  }
+
   return MONTH_KEYS.map((month, index) => {
     const ogMonthKey = `og${month.charAt(0).toUpperCase() + month.slice(1)}`;
     
@@ -689,7 +759,8 @@ async function getMonthlyData(filters = {}) {
       mesKey: month,
       presupuestado: total,
       presupuestadoInicial: totalOriginal,
-      ejecutado: 0,
+      // Ejecutado real por mes según fecha de documento (facturas + informes de gastos)
+      ejecutado: movimientosPorMes[index] || 0,
     };
   });
 }
@@ -706,9 +777,11 @@ async function getMonthlyData(filters = {}) {
  * @param {Object} amounts - Montos por mes {enero: X, ...}
  * @param {string} motivo - Justificación del traslado
  */
-async function createTransfer(fromId, toId, amounts, motivo) {
+async function createTransfer(fromId, toId, amounts, motivo, solicitante) {
   if (fromId === toId) throw new Error('La línea origen y destino deben ser diferentes.');
-  
+  if (!motivo || !motivo.trim()) throw new Error('El motivo del traslado es obligatorio.');
+  if (!solicitante || !solicitante.trim()) throw new Error('El nombre del solicitante es obligatorio.');
+
   const fromLine = await getBudgetLineById(fromId);
   const toLine = await getBudgetLineById(toId);
   if (!fromLine) throw new Error(`Línea origen ${fromId} no encontrada.`);
@@ -727,7 +800,8 @@ async function createTransfer(fromId, toId, amounts, motivo) {
     from_id_linea: fromId,
     to_id_linea: toId,
     amounts,
-    motivo: motivo || '',
+    motivo: motivo.trim(),
+    solicitante: solicitante.trim(),
     estado: 'pendiente',
   };
 
@@ -856,6 +930,75 @@ async function rejectTransfer(transferId, reason = '') {
   return { rejected: true, transferId };
 }
 
+/**
+ * Elimina un traslado solo si está en estado 'pendiente' o 'rechazado'.
+ * Los traslados aprobados no se pueden borrar porque ya fueron aplicados.
+ */
+async function deleteTransfer(transferId) {
+  const { data: transfer, error } = await supabaseRepository.supabase
+    .from('budget_transfers')
+    .select('estado')
+    .eq('id', transferId)
+    .single();
+
+  if (error || !transfer) throw new Error('Traslado no encontrado.');
+  if (!['pendiente', 'rechazado'].includes(transfer.estado)) {
+    throw new Error('Solo se pueden borrar traslados en estado pendiente o rechazado.');
+  }
+
+  const { error: delError } = await supabaseRepository.supabase
+    .from('budget_transfers')
+    .delete()
+    .eq('id', transferId);
+
+  if (delError) throw delError;
+  return { deleted: true, transferId };
+}
+
+/**
+ * Modifica un traslado en estado 'pendiente'.
+ * Permite actualizar fromId, toId, amounts, motivo y solicitante.
+ */
+async function updateTransfer(transferId, { fromId, toId, amounts, motivo, solicitante }) {
+  const { data: transfer, error } = await supabaseRepository.supabase
+    .from('budget_transfers')
+    .select('*')
+    .eq('id', transferId)
+    .single();
+
+  if (error || !transfer) throw new Error('Traslado no encontrado.');
+  if (transfer.estado !== 'pendiente') throw new Error('Solo se pueden modificar traslados en estado pendiente.');
+
+  if (fromId && toId && fromId === toId) throw new Error('La línea origen y destino deben ser diferentes.');
+
+  const fieldsToUpdate = {};
+  if (fromId) fieldsToUpdate.from_id_linea = fromId;
+  if (toId) fieldsToUpdate.to_id_linea = toId;
+  if (amounts) {
+    // Validar montos
+    let totalAmount = 0;
+    if (Array.isArray(amounts.rows)) {
+      totalAmount = amounts.rows.reduce((s, r) => s + (parseFloat(r.amount) || 0), 0);
+    } else {
+      totalAmount = Object.values(amounts).reduce((s, v) => s + (parseFloat(v) || 0), 0);
+    }
+    if (totalAmount <= 0) throw new Error('El traslado debe tener al menos un monto mayor a cero.');
+    fieldsToUpdate.amounts = amounts;
+  }
+  if (motivo !== undefined) fieldsToUpdate.motivo = motivo;
+  if (solicitante !== undefined) fieldsToUpdate.solicitante = solicitante;
+
+  const { data: updated, error: updErr } = await supabaseRepository.supabase
+    .from('budget_transfers')
+    .update(fieldsToUpdate)
+    .eq('id', transferId)
+    .select()
+    .single();
+
+  if (updErr) throw updErr;
+  return updated;
+}
+
 module.exports = {
   loadBudget,
   getSummary,
@@ -878,4 +1021,6 @@ module.exports = {
   listTransfers,
   approveTransfer,
   rejectTransfer,
+  deleteTransfer,
+  updateTransfer,
 };

@@ -1,0 +1,8 @@
+[2026-04-09T16:43:39.190Z] [Sync] Starting sync for year: 2026 with URL: http://www.a-maqerp.com
+[2026-04-09T16:43:39.202Z] [Sync] Calling fetchInvoices, fetchPurchaseOrders, fetchExpenseReports...
+[2026-04-09T16:43:46.165Z] [Sync] Invoices fetched: 450
+[2026-04-09T16:43:46.166Z] [Sync] Orders fetched: 207
+[2026-04-09T16:43:46.167Z] [Sync] Expense reports fetched: 122
+[2026-04-09T16:43:46.167Z] [Sync] Sample invoice ref: FP2511 - 00006669, options: {"options_01fp":"19","options_saldoafavor":null,"options_facturaanexa":null,"options_02fp":"Seg de vida ENE 2026","options_txt_cliente":"167","options_ppto":null}
+[2026-04-09T16:43:47.523Z] [Sync] Budget lines in DB: 178
+[2026-04-09T16:43:47.964Z] [Sync] 41 movimientos persistidos en Supabase.

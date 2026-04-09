@@ -46,6 +46,7 @@ const EMPTY_FORM = {
   fechaJulio: '', fechaAgosto: '', fechaSeptiembre: '', fechaOctubre: '', fechaNoviembre: '', fechaDiciembre: '',
   lineaEnero: '', lineaFebrero: '', lineaMarzo: '', lineaAbril: '', lineaMayo: '', lineaJunio: '',
   lineaJulio: '', lineaAgosto: '', lineaSeptiembre: '', lineaOctubre: '', lineaNoviembre: '', lineaDiciembre: '',
+  tipoComportamiento: 'Normal',
 };
 
 export default function BudgetForm({ line, filterOptions, budgetLines, onSave, onClose }) {
@@ -56,6 +57,7 @@ export default function BudgetForm({ line, filterOptions, budgetLines, onSave, o
   const [annualInitialInput, setAnnualInitialInput] = useState('');
   const [annualCurrentInput, setAnnualCurrentInput] = useState('');
   const [weekInputText, setWeekInputText] = useState('');
+  const [bolsaInput, setBolsaInput] = useState('');
   // PIN lock para edición del Presupuesto Inicial (estado global de sesión)
   const [initialUnlocked, setInitialUnlocked] = useState(() => sessionStorage.getItem('master_unlocked') === 'true');
   const [showPinModal, setShowPinModal] = useState(false);
@@ -198,6 +200,39 @@ export default function BudgetForm({ line, filterOptions, budgetLines, onSave, o
     setWeekInputText('');
   };
 
+  const handleRedistributeBolsa = () => {
+    const totalAnual = parseFloat(bolsaInput || 0);
+    if (isNaN(totalAnual) || totalAnual < 0) return;
+    
+    const ejecutado = form.ejecutadoAcumulado || 0;
+    const remaining = totalAnual - ejecutado;
+    if (remaining < 0) {
+      alert(`El total a redistribuir ($${totalAnual.toLocaleString('es-CO')}) debe ser mayor o igual a lo que ya se ha ejecutado ($${ejecutado.toLocaleString('es-CO')}).`);
+      return;
+    }
+    
+    const currentMonthIndex = new Date().getMonth();
+    const pastMonthsCount = currentMonthIndex;
+    const futureMonthsCount = 12 - currentMonthIndex;
+    
+    setForm(prev => {
+      const updated = { ...prev };
+      
+      const avgPast = pastMonthsCount > 0 ? Math.round(ejecutado / pastMonthsCount) : 0;
+      for (let i = 0; i < pastMonthsCount; i++) {
+        updated[MONTH_FIELDS[i].key] = avgPast;
+      }
+      
+      const avgFuture = futureMonthsCount > 0 ? Math.round(remaining / futureMonthsCount) : 0;
+      for (let i = pastMonthsCount; i < 12; i++) {
+        updated[MONTH_FIELDS[i].key] = avgFuture;
+      }
+      
+      return updated;
+    });
+    setBolsaInput('');
+  };
+
   const handleBaseLineToggle = (lineId) => {
     setSelectedBaseLineIds(prev => 
       prev.includes(lineId) ? prev.filter(id => id !== lineId) : [...prev, lineId]
@@ -281,14 +316,29 @@ export default function BudgetForm({ line, filterOptions, budgetLines, onSave, o
             <div className="form-grid">
               <div className="form-group full-width">
                 <label className="form-label">Nombre del elemento *</label>
-                <input
-                  className="form-input"
-                  type="text"
-                  value={form.nombreElemento}
-                  onChange={e => handleChange('nombreElemento', e.target.value)}
-                  required
-                  id="input-nombre-elemento"
-                />
+                <div style={{ display: 'flex', gap: '16px' }}>
+                  <input
+                    className="form-input"
+                    type="text"
+                    value={form.nombreElemento}
+                    onChange={e => handleChange('nombreElemento', e.target.value)}
+                    required
+                    id="input-nombre-elemento"
+                    style={{ flex: 1 }}
+                  />
+                  <div style={{ width: '200px', flexShrink: 0 }}>
+                    <label className="form-label" style={{ marginTop: '-24px', display: 'block' }}>Comportamiento *</label>
+                    <select
+                      className="form-select"
+                      value={form.tipoComportamiento || 'Normal'}
+                      onChange={e => handleChange('tipoComportamiento', e.target.value)}
+                      id="input-tipo-comportamiento"
+                    >
+                      <option value="Normal">Normal</option>
+                      <option value="Bolsa">Bolsa</option>
+                    </select>
+                  </div>
+                </div>
               </div>
 
               <div className="form-group">
@@ -592,6 +642,32 @@ export default function BudgetForm({ line, filterOptions, budgetLines, onSave, o
                     </button>
                   </div>
                 </div>
+
+                {form.tipoComportamiento === 'Bolsa' && (
+                  <div style={{ flex: '1 1 100%', minWidth: '250px', display: 'flex', flexDirection: 'column', gap: 8, background: 'rgba(46, 49, 146, 0.05)', padding: '12px', borderRadius: 4, border: '1.5px dashed var(--primary)' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <span style={{ fontSize: '0.85rem', color: 'var(--primary)', fontWeight: 600, flex: 1 }}>Redistribuir saldo en meses futuros (Línea tipo Bolsa)</span>
+                      <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Ejecutado a la fecha: ${(form.ejecutadoAcumulado || 0).toLocaleString('es-CO')}</span>
+                    </div>
+                    <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>Ajusta automáticamente los meses pasados al valor ejecutado, y divide el saldo restante entre el mes actual y diciembre.</span>
+                    <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                      <CurrencyInput
+                        value={bolsaInput}
+                        onChange={setBolsaInput}
+                        placeholder="Ingresa el Nuevo Presupuesto TOTAL Anual"
+                      />
+                      <button 
+                        type="button" 
+                        className="btn btn-primary btn-sm" 
+                        onClick={handleRedistributeBolsa}
+                        title="Distribuir el remanente en los meses futuros"
+                        disabled={!bolsaInput}
+                      >
+                        <Calculator style={{ width: 14, height: 14, marginRight: 6 }} /> Redistribuir Bolsa
+                      </button>
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
             

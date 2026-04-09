@@ -64,7 +64,8 @@ async function upsertBudgetLines(lines) {
       ejecutado_acumulado: line.ejecutadoAcumulado,
       saldo: line.saldo,
       estado: line.estado,
-      observaciones: line.observaciones
+      observaciones: line.observaciones,
+      tipo_comportamiento: line.tipo_comportamiento || 'Normal'
     });
 
     // Detail records (budget_allocations)
@@ -142,6 +143,7 @@ async function updateBudgetLine(idLinea, updates) {
       case 'totalOriginal': return 'total_original';
       case 'ejecutadoAcumulado': return 'ejecutado_acumulado';
       case 'idConsecutivo': return 'id_consecutivo';
+      case 'tipoComportamiento': return 'tipo_comportamiento';
       default: return key;
     }
   };
@@ -250,7 +252,8 @@ function mapSupabaseToApp(row) {
     ejecutadoAcumulado: row.ejecutado_acumulado || 0,
     saldo: row.saldo || 0,
     estado: row.estado || 'activa',
-    observaciones: row.observaciones || ''
+    observaciones: row.observaciones || '',
+    tipoComportamiento: row.tipo_comportamiento || 'Normal'
   };
 
   // Initialize all month keys to defaults
@@ -299,5 +302,50 @@ module.exports = {
   upsertBudgetLines,
   updateBudgetLine,
   deleteBudgetLine,
-  mapSupabaseToApp
+  mapSupabaseToApp,
+  upsertMovements,
+  getMovements,
 };
+
+// ============================================================
+// MOVIMIENTOS DE EJECUCIÓN (budget_movements)
+// Permiten calcular ejecutado real por mes con fechas de documento.
+// ============================================================
+
+/**
+ * Guarda (upsert) un lote de movimientos de ejecución en Supabase.
+ * La clave única es el campo `id` (ref del documento en Dolibarr + línea).
+ * @param {Array} movements - Array de { id, id_linea_presupuesto_uuid, fecha_documento, tipo_documento, proveedor, monto, moneda, estado_documento, ref }
+ */
+async function upsertMovements(movements) {
+  if (!movements || movements.length === 0) return;
+  const { error } = await supabase
+    .from('budget_movements')
+    .upsert(movements, { onConflict: 'id' });
+  if (error) {
+    console.error('Error upserting budget_movements:', error);
+    throw error;
+  }
+}
+
+/**
+ * Obtiene todos los movimientos de ejecución desde Supabase,
+ * opcionalmente filtrando por año de fecha_documento.
+ * @param {string|number} year - Año para filtrar (ej: '2026')
+ * @returns {Promise<Array>}
+ */
+async function getMovements(year) {
+  let query = supabase.from('budget_movements').select('*');
+  if (year) {
+    query = query
+      .gte('fecha_documento', `${year}-01-01`)
+      .lte('fecha_documento', `${year}-12-31`);
+  }
+  const { data, error } = await query;
+  if (error) {
+    console.error('Error fetching budget_movements:', error);
+    throw error;
+  }
+  return data || [];
+}
+

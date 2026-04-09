@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import './App.css';
 import Sidebar from './components/Sidebar';
 import KPICards from './components/KPICards';
@@ -45,6 +45,66 @@ function App() {
   const [showDeleted, setShowDeleted] = useState(false);
   // Timestamp de última sincronización con Dolibarr
   const [lastSync, setLastSync] = useState(() => localStorage.getItem('lastDolibarrSync') || null);
+  // Ref para el intervalo de auto-sync (persiste entre renders y navegación de vistas)
+  const autoSyncIntervalRef = useRef(null);
+
+  /**
+   * Configura el auto-sync de Dolibarr a nivel de App para que funcione
+   * independientemente de la vista activa. Lee la configuración desde localStorage
+   * cada vez que dispara para respetar cambios recientes.
+   */
+  useEffect(() => {
+    const setupAutoSync = () => {
+      // Limpiar intervalo previo si existe
+      if (autoSyncIntervalRef.current) {
+        clearInterval(autoSyncIntervalRef.current);
+        autoSyncIntervalRef.current = null;
+      }
+
+      const autoSyncEnabled = localStorage.getItem('dolibarr_autosync') === 'true';
+      if (!autoSyncEnabled) return;
+
+      const syncIntervalMins = parseInt(localStorage.getItem('dolibarr_sync_interval') || '30');
+      const intervalMs = Math.max(15, syncIntervalMins) * 60 * 1000;
+
+      autoSyncIntervalRef.current = setInterval(async () => {
+        const savedConfig = localStorage.getItem('dolibarr_config');
+        if (!savedConfig) return;
+        try {
+          const cfg = JSON.parse(savedConfig);
+          if (!cfg.url || !cfg.apiKey) return;
+          console.log(`[App Auto-sync] Disparando sincronización automática (cada ${syncIntervalMins} min)`);
+          const result = await syncDolibarr(cfg);
+          const now = new Date().toISOString();
+          setLastSync(now);
+          localStorage.setItem('lastDolibarrSync', now);
+          // Refrescar KPIs y tendencia mensual tras sync silencioso
+          await Promise.all([loadData(filters), loadLines(filters, showDeleted)]);
+          console.log('[App Auto-sync] Completado:', result);
+        } catch (e) {
+          console.error('[App Auto-sync] Error:', e.message);
+        }
+      }, intervalMs);
+
+      console.log(`[App Auto-sync] Configurado: cada ${syncIntervalMins} min`);
+    };
+
+    setupAutoSync();
+
+    // Escuchar cambios en localStorage para reconfigurar si el usuario cambia el intervalo
+    const handleStorageChange = (e) => {
+      if (e.key === 'dolibarr_autosync' || e.key === 'dolibarr_sync_interval') {
+        setupAutoSync();
+      }
+    };
+    window.addEventListener('storage', handleStorageChange);
+
+    return () => {
+      if (autoSyncIntervalRef.current) clearInterval(autoSyncIntervalRef.current);
+      window.removeEventListener('storage', handleStorageChange);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []); // Solo se ejecuta una vez al montar
 
   useEffect(() => {
     document.body.classList.toggle('processing', isProcessing);

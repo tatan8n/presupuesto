@@ -72,17 +72,14 @@ export default function DolibarrConfig({ onSync, lastSync }) {
     localStorage.setItem('dolibarr_autosync', String(autoSync));
     localStorage.setItem('dolibarr_sync_interval', String(syncInterval));
 
-    if (autoSync && config.url && config.apiKey) {
-      const intervalMs = Math.max(MIN_INTERVAL_MINS, syncInterval) * 60 * 1000;
-      autoSyncRef.current = setInterval(() => {
-        console.log(`[Auto-sync] Triggering automatic Dolibarr sync (every ${syncInterval} min)`);
-        performSync(true);
-      }, intervalMs);
-    }
+    // Notificar a App.jsx (que maneja el auto-sync global) via storage event
+    window.dispatchEvent(new StorageEvent('storage', {
+      key: 'dolibarr_autosync',
+      newValue: String(autoSync),
+    }));
 
-    return () => {
-      if (autoSyncRef.current) clearInterval(autoSyncRef.current);
-    };
+    // DolibarrConfig ya NO maneja el setInterval propio;
+    // el auto-sync real vive en App.jsx para no depender del montaje de este componente.
   }, [autoSync, syncInterval, config.url, config.apiKey, performSync]);
 
   const handleChange = (field, value) => {
@@ -221,7 +218,7 @@ export default function DolibarrConfig({ onSync, lastSync }) {
       {result && (
         <div className="chart-card" style={{ marginTop: 16 }}>
           <div className="chart-card-title">Resultado de sincronización</div>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 16 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 16 }}>
             <div>
               <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Facturas leídas</div>
               <div style={{ fontSize: '1.3rem', fontWeight: 700 }}>{result.facturas || 0}</div>
@@ -229,6 +226,10 @@ export default function DolibarrConfig({ onSync, lastSync }) {
             <div>
               <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Órdenes leídas</div>
               <div style={{ fontSize: '1.3rem', fontWeight: 700 }}>{result.ordenes || 0}</div>
+            </div>
+            <div>
+              <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Informes de gastos</div>
+              <div style={{ fontSize: '1.3rem', fontWeight: 700 }}>{result.informesGastos || 0}</div>
             </div>
             <div>
               <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Movimientos vinculados</div>

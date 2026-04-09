@@ -156,11 +156,11 @@ export async function listTransfers() {
 }
 
 /** Solicita un nuevo traslado (queda en estado 'pendiente'). */
-export async function createTransfer(fromId, toId, amounts, motivo) {
+export async function createTransfer(fromId, toId, amounts, motivo, solicitante) {
   const res = await fetch(`${API_BASE}/budget/transfers`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ fromId, toId, amounts, motivo }),
+    body: JSON.stringify({ fromId, toId, amounts, motivo, solicitante }),
   });
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
@@ -193,6 +193,33 @@ export async function rejectTransfer(transferId, reason = '') {
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
     throw new Error(err.error || 'Error al rechazar traslado');
+  }
+  return res.json();
+}
+
+/** Elimina un traslado en estado pendiente o rechazado. */
+export async function deleteTransfer(transferId) {
+  const res = await fetch(`${API_BASE}/budget/transfers/${transferId}`, {
+    method: 'DELETE',
+    headers: { 'Content-Type': 'application/json' },
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || 'Error al eliminar traslado');
+  }
+  return res.json();
+}
+
+/** Modifica un traslado en estado pendiente. */
+export async function updateTransfer(transferId, data) {
+  const res = await fetch(`${API_BASE}/budget/transfers/${transferId}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || 'Error al modificar traslado');
   }
   return res.json();
 }

@@ -61,6 +61,7 @@ function createBudgetLine(row, index) {
     saldo: 0,
     estado: row.estado || 'activa',
     observaciones: row.observaciones || '',
+    tipoComportamiento: row.tipoComportamiento || 'Normal',
   };
   return line;
 }
@@ -119,6 +120,7 @@ function budgetLineToExcelRow(line) {
     'ICGI': line.icgi,
     '% Mat, CIF, com': line.porcentaje,
     'Línea': line.linea,
+    'Comportamiento': line.tipoComportamiento || 'Normal',
   };
 }
 

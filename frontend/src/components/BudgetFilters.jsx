@@ -1,4 +1,4 @@
-import { Search, X } from 'lucide-react';
+import { Search, X, DollarSign } from 'lucide-react';
 import MultiSelect from './MultiSelect';
 import ICGIToggle from './ICGIToggle';
 
@@ -10,6 +10,20 @@ export default function BudgetFilters({ filters, filterOptions, onFilterChange }
   const clearFilters = () => {
     onFilterChange({ escenario: [1] }); // Reset to default scenario
   };
+
+  // Activa/desactiva el filtro rápido "CGI sin Salarios"
+  const toggleSinSalarios = () => {
+    const active = filters.excludeSalarios === true || filters.excludeSalarios === 'true';
+    if (active) {
+      // eslint-disable-next-line no-unused-vars
+      const { excludeSalarios, ...rest } = filters;
+      onFilterChange(rest);
+    } else {
+      onFilterChange({ ...filters, excludeSalarios: true });
+    }
+  };
+
+  const sinSalariosActive = filters.excludeSalarios === true || filters.excludeSalarios === 'true';
 
   const hasActiveFilters = Object.entries(filters).some(([key, value]) => {
     if (key === 'escenario' && Array.isArray(value) && value.length === 1 && value[0] === 1) return false;
@@ -30,8 +44,8 @@ export default function BudgetFilters({ filters, filterOptions, onFilterChange }
           style={{ paddingLeft: 36, width: '100%', minWidth: 'auto' }}
         />
         {(filters.search) && (
-          <X 
-            style={{ position: 'absolute', right: 12, top: '50%', transform: 'translateY(-50%)', width: 14, height: 14, color: 'var(--text-muted)', cursor: 'pointer' }} 
+          <X
+            style={{ position: 'absolute', right: 12, top: '50%', transform: 'translateY(-50%)', width: 14, height: 14, color: 'var(--text-muted)', cursor: 'pointer' }}
             onClick={() => onFilterChange({ ...filters, search: '' })}
           />
         )}
@@ -80,9 +94,21 @@ export default function BudgetFilters({ filters, filterOptions, onFilterChange }
           placeholder="Todas"
         />
 
+        {/* Botón filtro rápido: CGI sin Salarios */}
+        <button
+          id="btn-filter-sin-salarios"
+          className={`btn btn-sm ${sinSalariosActive ? 'btn-primary' : 'btn-outline'}`}
+          onClick={toggleSinSalarios}
+          title="Muestra costos, gastos fijos e inversiones excluyendo cuentas de salarios"
+          style={{ gap: 5, fontWeight: sinSalariosActive ? 700 : 500 }}
+        >
+          <DollarSign style={{ width: 13, height: 13 }} />
+          CGI sin Salarios
+        </button>
+
         {hasActiveFilters && (
-          <button 
-            className="btn btn-ghost btn-sm" 
+          <button
+            className="btn btn-ghost btn-sm"
             onClick={clearFilters}
             style={{ color: 'var(--danger)', fontWeight: 600 }}
           >

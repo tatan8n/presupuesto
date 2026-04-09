@@ -212,11 +212,17 @@ router.get('/transfers/list', async (req, res) => {
 /** POST /api/budget/transfers — Solicita un nuevo traslado (pendiente) */
 router.post('/transfers', async (req, res) => {
   try {
-    const { fromId, toId, amounts, motivo } = req.body;
+    const { fromId, toId, amounts, motivo, solicitante } = req.body;
     if (!fromId || !toId || !amounts) {
       return res.status(400).json({ error: 'Se requieren fromId, toId y amounts.' });
     }
-    const transfer = await budgetService.createTransfer(fromId, toId, amounts, motivo);
+    if (!motivo || !motivo.trim()) {
+      return res.status(400).json({ error: 'El motivo es obligatorio.' });
+    }
+    if (!solicitante || !solicitante.trim()) {
+      return res.status(400).json({ error: 'El nombre del solicitante es obligatorio.' });
+    }
+    const transfer = await budgetService.createTransfer(fromId, toId, amounts, motivo, solicitante);
     res.status(201).json(transfer);
   } catch (error) {
     res.status(400).json({ error: error.message });
@@ -237,6 +243,27 @@ router.post('/transfers/:id/approve', async (req, res) => {
 router.post('/transfers/:id/reject', async (req, res) => {
   try {
     const result = await budgetService.rejectTransfer(req.params.id, req.body.reason);
+    res.json(result);
+  } catch (error) {
+    res.status(400).json({ error: error.message });
+  }
+});
+
+/** DELETE /api/budget/transfers/:id — Elimina un traslado en estado pendiente o rechazado */
+router.delete('/transfers/:id', async (req, res) => {
+  try {
+    const result = await budgetService.deleteTransfer(req.params.id);
+    res.json(result);
+  } catch (error) {
+    res.status(400).json({ error: error.message });
+  }
+});
+
+/** PUT /api/budget/transfers/:id — Modifica un traslado en estado pendiente */
+router.put('/transfers/:id', async (req, res) => {
+  try {
+    const { fromId, toId, amounts, motivo, solicitante } = req.body;
+    const result = await budgetService.updateTransfer(req.params.id, { fromId, toId, amounts, motivo, solicitante });
     res.json(result);
   } catch (error) {
     res.status(400).json({ error: error.message });

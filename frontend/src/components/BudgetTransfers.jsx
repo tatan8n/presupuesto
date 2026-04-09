@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
 import { ArrowLeftRight, Check, X, Plus, Clock, ChevronDown, ChevronUp, AlertTriangle, Lock, Trash2, Search } from 'lucide-react';
 import { formatCurrency } from '../utils/formatters';
-import { listTransfers, createTransfer, approveTransfer, rejectTransfer } from '../services/api';
+import { listTransfers, createTransfer, approveTransfer, rejectTransfer, deleteTransfer, updateTransfer } from '../services/api';
 import MasterPinUnlock from './MasterPinUnlock';
 import CurrencyInput from './CurrencyInput';
 
@@ -398,6 +398,9 @@ export default function BudgetTransfers({ budgetLines = [], onTransferComplete }
   const [pinAction, setPinAction] = useState(null);
   const [showPin, setShowPin]     = useState(false);
   const [filterEstado, setFilterEstado] = useState('all');
+  const [solicitante, setSolicitante]   = useState('');
+  // Para edición de traslado pendiente
+  const [editingTransferId, setEditingTransferId] = useState(null);
 
   const notify = (msg, type = 'success') => {
     if (type === 'error') setError(msg);
@@ -428,6 +431,8 @@ export default function BudgetTransfers({ budgetLines = [], onTransferComplete }
     if (!fromId || !toId)   { notify('Selecciona línea origen y destino', 'error'); return; }
     if (fromId === toId)    { notify('Origen y destino deben ser diferentes', 'error'); return; }
     if (totalTraslado <= 0) { notify('Ingresa al menos un monto mayor a cero', 'error'); return; }
+    if (!motivo.trim())     { notify('El motivo del traslado es obligatorio', 'error'); return; }
+    if (!solicitante.trim()){ notify('El nombre del solicitante es obligatorio', 'error'); return; }
 
     // Validar excesos por mes origen. Cada fila i corresponde a MONTH_KEYS[i].
     for (let i = 0; i < MONTH_KEYS.length; i++) {
@@ -443,14 +448,20 @@ export default function BudgetTransfers({ budgetLines = [], onTransferComplete }
 
     setSubmitting(true);
     try {
-      // Serializar: cada fila i → fromMonth = MONTH_KEYS[i].key, toMonth = rows[i].toMonth
       const serializedRows = rows
         .map((r, i) => ({ fromMonth: MONTH_KEYS[i].key, toMonth: r.toMonth, amount: r.amount }))
         .filter(r => parseFloat(r.amount) > 0);
       const amounts = { rows: serializedRows };
-      await createTransfer(fromId, toId, amounts, motivo);
-      notify('Traslado solicitado correctamente. Queda pendiente de aprobación.');
-      setShowForm(false); setFromId(''); setToId(''); setRows(INIT_ROWS()); setMotivo('');
+
+      if (editingTransferId) {
+        // Modificar traslado pendiente existente
+        await updateTransfer(editingTransferId, { fromId, toId, amounts, motivo, solicitante });
+        notify('Traslado modificado correctamente.');
+      } else {
+        await createTransfer(fromId, toId, amounts, motivo, solicitante);
+        notify('Traslado solicitado correctamente. Queda pendiente de aprobación.');
+      }
+      setShowForm(false); setFromId(''); setToId(''); setRows(INIT_ROWS()); setMotivo(''); setSolicitante(''); setEditingTransferId(null);
       await loadTransfers();
       if (onTransferComplete) onTransferComplete();
     } catch (e) { notify(e.message, 'error'); }
@@ -459,6 +470,40 @@ export default function BudgetTransfers({ budgetLines = [], onTransferComplete }
 
   const handleApproveClick = (id) => { setPinAction({ type: 'approve', transferId: id }); setShowPin(true); };
   const handleRejectClick  = (id) => { setPinAction({ type: 'reject',  transferId: id }); setShowPin(true); };
+
+  /** Elimina un traslado en estado pendiente o rechazado tras confirmación. */
+  const handleDeleteTransfer = async (t) => {
+    if (!window.confirm(`¿Eliminar el traslado del ${new Date(t.created_at).toLocaleDateString('es-CO')}? Esta acción no se puede deshacer.`)) return;
+    try {
+      await deleteTransfer(t.id);
+      notify('Traslado eliminado correctamente.');
+      await loadTransfers();
+      if (onTransferComplete) onTransferComplete();
+    } catch (e) { notify(e.message, 'error'); }
+  };
+
+  /** Abre el formulario en modo edición con los datos del traslado pendiente. */
+  const handleEditTransfer = (t) => {
+    setEditingTransferId(t.id);
+    setFromId(t.from_id_linea || '');
+    setToId(t.to_id_linea || '');
+    setMotivo(t.motivo || '');
+    setSolicitante(t.solicitante || '');
+    // Reconstruir rows desde amounts.rows
+    const amts = t.amounts || {};
+    const newRows = INIT_ROWS();
+    if (Array.isArray(amts.rows)) {
+      amts.rows.forEach(r => {
+        const idx = MONTH_KEYS.findIndex(m => m.key === r.fromMonth);
+        if (idx >= 0) newRows[idx] = { toMonth: r.toMonth, amount: r.amount };
+      });
+    }
+    setRows(newRows);
+    setShowForm(true);
+    setExpandedId(null);
+    // Scroll al formulario
+    setTimeout(() => window.scrollTo({ top: 0, behavior: 'smooth' }), 50);
+  };
 
   const handlePinUnlock = async (ok) => {
     setShowPin(false);
@@ -530,16 +575,44 @@ export default function BudgetTransfers({ budgetLines = [], onTransferComplete }
               )}
             </div>
 
-            {/* Motivo */}
+            {/* Motivo (obligatorio) */}
+            <div className="form-group" style={{ marginBottom: 12 }}>
+              <label className="form-label">
+                Motivo / Justificación <span style={{ color: 'var(--danger)' }}>*</span>
+              </label>
+              <textarea
+                className="form-input"
+                value={motivo}
+                onChange={e => setMotivo(e.target.value)}
+                rows={2}
+                placeholder="Describe el motivo del traslado..."
+                style={{ resize: 'vertical', borderColor: !motivo.trim() ? 'var(--danger)' : undefined }}
+                required
+              />
+            </div>
+
+            {/* Solicitante (obligatorio) */}
             <div className="form-group" style={{ marginBottom: 16 }}>
-              <label className="form-label">Motivo / Justificación</label>
-              <textarea className="form-input" value={motivo} onChange={e => setMotivo(e.target.value)} rows={2} placeholder="Describe el motivo del traslado..." style={{ resize: 'vertical' }} />
+              <label className="form-label">
+                Nombre del solicitante <span style={{ color: 'var(--danger)' }}>*</span>
+              </label>
+              <input
+                className="form-input"
+                type="text"
+                value={solicitante}
+                onChange={e => setSolicitante(e.target.value)}
+                placeholder="Ej: Juan Pérez"
+                style={{ borderColor: !solicitante.trim() ? 'var(--danger)' : undefined }}
+                required
+              />
             </div>
 
             <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
-              <button type="button" className="btn btn-outline" onClick={() => setShowForm(false)}>Cancelar</button>
+              <button type="button" className="btn btn-outline" onClick={() => { setShowForm(false); setEditingTransferId(null); setFromId(''); setToId(''); setRows(INIT_ROWS()); setMotivo(''); setSolicitante(''); }}>Cancelar</button>
               <button type="submit" className="btn btn-primary" disabled={submitting || totalTraslado <= 0}>
-                {submitting ? 'Solicitando...' : `Solicitar traslado${totalTraslado > 0 ? ` de ${formatCurrency(totalTraslado)}` : ''}`}
+                {submitting ? 'Guardando...' : editingTransferId
+                  ? `Guardar cambios${totalTraslado > 0 ? ` (${formatCurrency(totalTraslado)})` : ''}`
+                  : `Solicitar traslado${totalTraslado > 0 ? ` de ${formatCurrency(totalTraslado)}` : ''}`}
               </button>
             </div>
           </form>
@@ -592,8 +665,22 @@ export default function BudgetTransfers({ budgetLines = [], onTransferComplete }
                       <button className="btn btn-success btn-sm" onClick={e => { e.stopPropagation(); handleApproveClick(t.id); }}>
                         <Lock style={{ width: 11, height: 11 }} /><Check style={{ width: 11, height: 11 }} /> Aprobar
                       </button>
+                      <button className="btn btn-outline btn-sm" onClick={e => { e.stopPropagation(); handleEditTransfer(t); }} title="Editar traslado pendiente">
+                        ✏️ Editar
+                      </button>
                       <button className="btn btn-danger btn-sm" onClick={e => { e.stopPropagation(); handleRejectClick(t.id); }}>
                         <X style={{ width: 11, height: 11 }} /> Rechazar
+                      </button>
+                    </div>
+                  )}
+                  {t.estado === 'rechazado' && (
+                    <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}>
+                      <button
+                        className="btn btn-danger btn-sm"
+                        onClick={e => { e.stopPropagation(); handleDeleteTransfer(t); }}
+                        title="Borrar traslado rechazado"
+                      >
+                        <Trash2 style={{ width: 11, height: 11 }} /> Borrar
                       </button>
                     </div>
                   )}
@@ -603,8 +690,14 @@ export default function BudgetTransfers({ budgetLines = [], onTransferComplete }
                 {isExpanded && (
                   <div style={{ marginTop: 14, paddingTop: 14, borderTop: '1px solid var(--border-light)' }}>
                     <TransferDetailTable transfer={t} />
+                    {/* Solicitante */}
+                    {t.solicitante && (
+                      <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', marginTop: 10 }}>
+                        <strong>Solicitante:</strong> {t.solicitante}
+                      </div>
+                    )}
                     {t.motivo && (
-                      <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', marginTop: 12, fontStyle: 'italic' }}>
+                      <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', marginTop: 6, fontStyle: 'italic' }}>
                         <strong>Motivo:</strong> {t.motivo}
                       </div>
                     )}
