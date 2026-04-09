@@ -47,8 +47,8 @@ const MONTH_FIELDS = [
   { key: 'diciembre', dateKey: 'fechaDiciembre', label: 'Diciembre' },
 ];
 
-export default function WeeklyFlowChart({ allLines = [], filters, options, onOptionsChange, onEdit }) {
-  const { displayWeeks = 12, filterEERR = false, startWeek = 'current' } = options || {};
+export default function WeeklyFlowChart({ lines = [], options, onOptionsChange, onEdit }) {
+  const { displayWeeks = 12, startWeek = 'current' } = options || {};
   const [expandedWeeks, setExpandedWeeks] = useState(new Set());
   const currentWeek = getCurrentWeek();
 
@@ -68,7 +68,6 @@ export default function WeeklyFlowChart({ allLines = [], filters, options, onOpt
   const effectiveStartWeek = startWeek === 'current' ? currentWeek : parseInt(startWeek);
 
   const setDisplayWeeks = (val) => onOptionsChange({ ...options, displayWeeks: val });
-  const setFilterEERR = (val) => onOptionsChange({ ...options, filterEERR: val });
   const setStartWeek = (val) => onOptionsChange({ ...options, startWeek: val });
 
   const toggleWeek = (week) => {
@@ -82,30 +81,8 @@ export default function WeeklyFlowChart({ allLines = [], filters, options, onOpt
   };
 
   const aggregatedData = useMemo(() => {
-    // 1. Filtrar líneas
-    let filteredLines = allLines;
-    
-    // Aplicar filtros globales
-    if (filters.area && filters.area.length > 0) {
-      filteredLines = filteredLines.filter(l => filters.area.includes(l.area));
-    }
-    if (filters.linea && filters.linea.length > 0) {
-      filteredLines = filteredLines.filter(l => filters.linea.includes(l.linea));
-    }
-    if (filters.escenario && filters.escenario.length > 0) {
-      filteredLines = filteredLines.filter(l => filters.escenario.includes(l.escenario));
-    }
-
-    // Filtro EERR simplified
-    if (filterEERR) {
-      filteredLines = filteredLines.filter(line => {
-        const isIngreso = (line.cuenta || '').startsWith('01');
-        const cc = (line.cuentaContable || '').toLowerCase();
-        const isSalary = cc.includes('salario') || cc.includes('sueldo');
-        const isExtra = cc.includes('comision') || cc.includes('bonificacion') || cc.includes('industria y comercio') || cc.includes('compra implemento');
-        return !isIngreso && !isSalary && !isExtra;
-      });
-    }
+    // 1. Las líneas ya vienen filtradas desde App.jsx
+    let filteredLines = lines;
 
     // 2. Inicializar semanas
     const weeksMap = Array(52).fill(0).map((_, i) => ({
@@ -164,7 +141,7 @@ export default function WeeklyFlowChart({ allLines = [], filters, options, onOpt
     });
 
     return weeksMap.filter(w => w.semana >= effectiveStartWeek && w.semana < effectiveStartWeek + displayWeeks);
-  }, [allLines, filters, filterEERR, displayWeeks, effectiveStartWeek]);
+  }, [lines, displayWeeks, effectiveStartWeek]);
 
   return (
     <div className="fade-in">
@@ -187,7 +164,7 @@ export default function WeeklyFlowChart({ allLines = [], filters, options, onOpt
             />
           </div>
 
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
             <span style={{ fontSize: '0.75rem', fontWeight: 600, color: '#6B7280', marginLeft: 4 }}>Semanas a ver</span>
             <SingleSelect
               options={[
@@ -204,32 +181,8 @@ export default function WeeklyFlowChart({ allLines = [], filters, options, onOpt
               width={160}
             />
           </div>
-
-          <button
-            onClick={() => setFilterEERR(!filterEERR)}
-            className={filterEERR ? 'btn-primary' : 'btn-outline'}
-            style={{ 
-              display: 'flex', 
-              alignItems: 'center', 
-              gap: 8,
-              height: 42,
-              borderRadius: 10,
-              padding: '0 16px',
-              fontSize: '0.85rem'
-            }}
-          >
-            <Filter size={16} />
-            {filterEERR ? 'Filtro EERR Activo' : 'Ver solo Gastos/Inv.'}
-          </button>
         </div>
       </div>
-
-      {filterEERR && (
-        <div className="filter-info-banner">
-          <Info size={14} />
-          <span>Mostrando solo <strong>Costos, Gastos e Inversiones</strong> (sin sueldos).</span>
-        </div>
-      )}
 
       {/* Gráfico (Mismo código anterior) */}
       <div className="chart-card">

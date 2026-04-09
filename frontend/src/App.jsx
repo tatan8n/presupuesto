@@ -596,7 +596,7 @@ function App() {
       case 'semanal':
         return (
           <WeeklyFlowChart
-            allLines={allBudgetLines}
+            lines={budgetLines}
             filters={filters}
             options={weeklyOptions}
             onOptionsChange={setWeeklyOptions}
