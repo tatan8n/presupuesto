@@ -6,3 +6,35 @@
 [2026-04-09T16:43:46.167Z] [Sync] Sample invoice ref: FP2511 - 00006669, options: {"options_01fp":"19","options_saldoafavor":null,"options_facturaanexa":null,"options_02fp":"Seg de vida ENE 2026","options_txt_cliente":"167","options_ppto":null}
 [2026-04-09T16:43:47.523Z] [Sync] Budget lines in DB: 178
 [2026-04-09T16:43:47.964Z] [Sync] 41 movimientos persistidos en Supabase.
+[2026-04-10T16:51:32.604Z] [Sync] Starting sync for year: 2026 with URL: http://www.a-maqerp.com
+[2026-04-10T16:51:32.610Z] [Sync] Calling fetchInvoices, fetchPurchaseOrders, fetchExpenseReports...
+[2026-04-10T16:51:37.496Z] [Sync] Invoices fetched: 482
+[2026-04-10T16:51:37.497Z] [Sync] Orders fetched: 218
+[2026-04-10T16:51:37.498Z] [Sync] Expense reports fetched: 122
+[2026-04-10T16:51:37.499Z] [Sync] Sample invoice ref: FP2511 - 00006669, options: {"options_01fp":"19","options_saldoafavor":null,"options_facturaanexa":null,"options_02fp":"Seg de vida ENE 2026","options_txt_cliente":"167","options_ppto":null}
+[2026-04-10T16:51:37.500Z] [Sync] Budget lines in DB: 178
+[2026-04-10T16:51:38.002Z] [Sync] 53 movimientos persistidos en Supabase.
+[2026-04-10T17:11:57.280Z] [Sync] Starting sync for year: 2026 with URL: http://www.a-maqerp.com
+[2026-04-10T17:11:57.283Z] [Sync] Calling fetchInvoices, fetchPurchaseOrders, fetchExpenseReports...
+[2026-04-10T17:12:03.114Z] [Sync] Invoices fetched: 482
+[2026-04-10T17:12:03.115Z] [Sync] Orders fetched: 218
+[2026-04-10T17:12:03.115Z] [Sync] Expense reports fetched: 122
+[2026-04-10T17:12:03.115Z] [Sync] Sample invoice ref: FP2511 - 00006669, options: {"options_01fp":"19","options_saldoafavor":null,"options_facturaanexa":null,"options_02fp":"Seg de vida ENE 2026","options_txt_cliente":"167","options_ppto":null}
+[2026-04-10T17:12:03.116Z] [Sync] Budget lines in DB: 178
+[2026-04-10T17:12:03.381Z] [Sync] 53 movimientos persistidos en Supabase.
+[2026-04-10T17:39:53.449Z] [Sync] Starting sync for year: 2026 with URL: http://www.a-maqerp.com
+[2026-04-10T17:39:53.451Z] [Sync] Calling fetchInvoices, fetchPurchaseOrders, fetchExpenseReports...
+[2026-04-10T17:39:59.683Z] [Sync] Invoices fetched: 482
+[2026-04-10T17:39:59.684Z] [Sync] Orders fetched: 218
+[2026-04-10T17:39:59.686Z] [Sync] Expense reports fetched: 122
+[2026-04-10T17:39:59.687Z] [Sync] Sample invoice ref: FP2511 - 00006669, options: {"options_01fp":"19","options_saldoafavor":null,"options_facturaanexa":null,"options_02fp":"Seg de vida ENE 2026","options_txt_cliente":"167","options_ppto":null}
+[2026-04-10T17:39:59.688Z] [Sync] Budget lines in DB: 178
+[2026-04-10T17:40:00.057Z] [Sync] 53 movimientos persistidos en Supabase.
+[2026-04-10T17:56:53.426Z] [Sync] Starting sync for year: 2026 with URL: http://www.a-maqerp.com
+[2026-04-10T17:56:53.428Z] [Sync] Calling fetchInvoices, fetchPurchaseOrders, fetchExpenseReports...
+[2026-04-10T17:57:02.156Z] [Sync] Invoices fetched: 482
+[2026-04-10T17:57:02.158Z] [Sync] Orders fetched: 218
+[2026-04-10T17:57:02.159Z] [Sync] Expense reports fetched: 122
+[2026-04-10T17:57:02.160Z] [Sync] Sample invoice ref: FP2511 - 00006669, options: {"options_01fp":"19","options_saldoafavor":null,"options_facturaanexa":null,"options_02fp":"Seg de vida ENE 2026","options_txt_cliente":"167","options_ppto":null}
+[2026-04-10T17:57:02.162Z] [Sync] Budget lines in DB: 178
+[2026-04-10T17:57:02.497Z] [Sync] 53 movimientos persistidos en Supabase.

@@ -148,7 +148,7 @@ function generateWeeklyCashFlowExcel(lines, options = {}) {
 
     // Only add requested weeks
     for (let i = startWeek - 1; i < endWeek; i++) {
-      row[`Semana ${i + 1}`] = weeks[i] || 0;
+      row[`${i + 1}`] = weeks[i] || 0;
     }
 
     if (!simplified) {
@@ -159,7 +159,47 @@ function generateWeeklyCashFlowExcel(lines, options = {}) {
   });
 
   const workbook = XLSX.utils.book_new();
-  const worksheet = XLSX.utils.json_to_sheet(excelRows);
+
+  // Create AoA (Array of Arrays) to have a multi-line header
+  const headerRow1 = ['Área', 'Nombre del elemento'];
+  if (!simplified) {
+    headerRow1.push('Línea', 'Escenario', 'Tipo (ICGI)', 'Cuenta Contable', 'Número de cuenta');
+  }
+  const headerRow2 = [...headerRow1.map(() => '')]; // empty under static fields
+
+  // Month assignment per week
+  for (let i = startWeek - 1; i < endWeek; i++) {
+     const approxMonth = Math.floor(i / 4.33); // basic approximation
+     const monthNames = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
+     headerRow1.push(monthNames[Math.min(11, approxMonth)]);
+     headerRow2.push(`${i + 1}`);
+  }
+  
+  if (!simplified) {
+     headerRow1.push('');
+     headerRow2.push('Total Flujo');
+  }
+
+  const aoa = [headerRow1, headerRow2];
+  
+  // Data rows
+  excelRows.forEach(row => {
+     const rowArr = [];
+     rowArr.push(row['Área']);
+     rowArr.push(row['Nombre del elemento']);
+     if (!simplified) {
+       rowArr.push(row['Línea'], row['Escenario'], row['Tipo (ICGI)'], row['Cuenta Contable'], row['Número de cuenta']);
+     }
+     for (let i = startWeek - 1; i < endWeek; i++) {
+       rowArr.push(row[`${i + 1}`]);
+     }
+     if (!simplified) rowArr.push(row['Total Flujo']);
+     aoa.push(rowArr);
+  });
+
+  const worksheet = XLSX.utils.aoa_to_sheet(aoa);
+  // Merge month cells (ejemplo, dejamos así por ahora)
+
   XLSX.utils.book_append_sheet(workbook, worksheet, 'Flujo Semanal');
 
   // Adjust column widths
@@ -178,5 +218,54 @@ function generateWeeklyCashFlowExcel(lines, options = {}) {
   return XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx' });
 }
 
-module.exports = { readBudgetFromExcel, writeBudgetToExcel, generateWeeklyCashFlowExcel };
+function generateCustomWeeklyCashFlowExcel(customData, options = {}) {
+  const { startWeek = 1, endWeek = 52 } = options;
+  const workbook = XLSX.utils.book_new();
+
+  // Ordenar: Facturas Pendientes arriba, luego Presupuestado ordenado por Área
+  customData.sort((a, b) => {
+    const typeA = a.tipificacion || 'Presupuestado';
+    const typeB = b.tipificacion || 'Presupuestado';
+    if (typeA !== typeB) {
+      return typeA === 'Factura Pendiente' ? -1 : 1;
+    }
+    return (a.area || '').localeCompare(b.area || '');
+  });
+
+  const headerRow1 = ['Área', 'Tipificación', 'Nombre del elemento'];
+  const headerRow2 = ['', '', '']; 
+
+  for (let i = startWeek - 1; i < endWeek; i++) {
+     const approxMonth = Math.floor(i / 4.33); 
+     const monthNames = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
+     headerRow1.push(monthNames[Math.min(11, approxMonth)]);
+     headerRow2.push(`${i + 1}`);
+  }
+  
+  const aoa = [headerRow1, headerRow2];
+  
+  customData.forEach(row => {
+     const rowArr = [
+       row.area || '', 
+       row.tipificacion || 'Presupuestado', 
+       row.nombreElemento || ''
+     ];
+     for (let i = startWeek; i <= endWeek; i++) {
+       rowArr.push(row[`w${i}`] || 0);
+     }
+     aoa.push(rowArr);
+  });
+
+  const worksheet = XLSX.utils.aoa_to_sheet(aoa);
+
+  // Adjust column widths
+  const colWidths = [ { wch: 15 }, { wch: 20 }, { wch: 35 }, { wch: 15 } ];
+  for (let i = startWeek - 1; i < endWeek; i++) { colWidths.push({ wch: 12 }); }
+  worksheet['!cols'] = colWidths;
+
+  XLSX.utils.book_append_sheet(workbook, worksheet, 'Flujo Refinado');
+  return XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx' });
+}
+
+module.exports = { readBudgetFromExcel, writeBudgetToExcel, generateWeeklyCashFlowExcel, generateCustomWeeklyCashFlowExcel };
 

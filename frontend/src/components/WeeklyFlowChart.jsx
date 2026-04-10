@@ -5,8 +5,9 @@ import {
 } from 'recharts';
 import { formatCurrency } from '../utils/formatters';
 import { getWeekRange, getCurrentWeek } from '../utils/dateUtils';
-import { Filter, Calendar, Info, ChevronDown, ChevronRight, Edit2 } from 'lucide-react';
+import { Filter, Calendar, Info, ChevronDown, ChevronRight, Edit2, Download, AlertCircle, Check, X } from 'lucide-react';
 import SingleSelect from './SingleSelect';
+import { getUnpaidInvoices, exportCustomWeeklyExcel, exportWeeklyExcel } from '../services/api';
 
 function CustomTooltip({ active, payload, label }) {
   if (!active || !payload?.length) return null;
@@ -52,6 +53,105 @@ export default function WeeklyFlowChart({ lines = [], options, onOptionsChange, 
   const [expandedWeeks, setExpandedWeeks] = useState(new Set());
   const currentWeek = getCurrentWeek();
 
+  // Modo de Vista: 'presupuesto' | 'facturas'
+  const [viewMode, setViewMode] = useState('presupuesto');
+  const [unpaidInvoices, setUnpaidInvoices] = useState([]);
+  const [loadingInvoices, setLoadingInvoices] = useState(false);
+  const [excludedInvoices, setExcludedInvoices] = useState(new Set());
+
+  const toggleExclude = (idMovimiento) => {
+    setExcludedInvoices(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(idMovimiento)) {
+         newSet.delete(idMovimiento);
+      } else {
+         newSet.add(idMovimiento);
+      }
+      return newSet;
+    });
+  };
+  const effectiveStartWeek = startWeek === 'current' ? currentWeek : parseInt(startWeek);
+
+  const loadUnpaidInvoices = async () => {
+    try {
+      setLoadingInvoices(true);
+      const endWeek = effectiveStartWeek + displayWeeks;
+      const savedConfig = localStorage.getItem('dolibarr_config');
+      const dolibarrConfig = savedConfig ? JSON.parse(savedConfig) : null;
+      
+      const data = await getUnpaidInvoices(endWeek, dolibarrConfig);
+      console.log('[DEBUG] Invoices received from API:', data);
+      setUnpaidInvoices(data || []);
+      setViewMode('facturas'); // Switch to invoices view automatically
+    } catch (e) {
+      alert("Error al cargar facturas pendientes: " + e.message);
+    } finally {
+      setLoadingInvoices(false);
+    }
+  };
+
+  const handleExport = async () => {
+    const linesMap = new Map();
+    const endWeek = effectiveStartWeek + displayWeeks;
+
+    // Helper para procesar grupos de datos
+    const processItems = (items, isInvoice) => {
+      items.forEach(item => {
+        // Lógica similar a useMemo pero para TODOS los datos
+        if (isInvoice) {
+          if (excludedInvoices.has(item.id_movimiento)) return;
+          const date = new Date(item.fecha_limite * 1000);
+          const wk = getCurrentWeek(date);
+          
+          const key = `inv_${item.id_movimiento}`;
+          if (!linesMap.has(key)) {
+            linesMap.set(key, {
+              area: 'Factura Dolibarr',
+              tipificacion: 'Factura Pendiente',
+              nombreElemento: `${item.ref || 'Factura'} - ${item.proveedor}`,
+            });
+          }
+          const entry = linesMap.get(key);
+          entry[`w${wk}`] = (entry[`w${wk}`] || 0) + (parseFloat(item.monto) || 0);
+        } else {
+          MONTH_FIELDS.forEach((m, monthIndex) => {
+            const amount = item[m.key] || 0;
+            if (amount <= 0) return;
+            
+            let wk;
+            if (item[m.dateKey]) {
+              wk = getCurrentWeek(new Date(2026, monthIndex, parseInt(item[m.dateKey])));
+            } else {
+              wk = getCurrentWeek(new Date(2026, monthIndex + 1, 0));
+            }
+            
+            const key = `line_${item.id_linea}`;
+            if (!linesMap.has(key)) {
+              linesMap.set(key, {
+                area: item.area || 'Compras',
+                tipificacion: 'Presupuestado',
+                nombreElemento: item.nombreElemento,
+              });
+            }
+            const entry = linesMap.get(key);
+            entry[`w${wk}`] = (entry[`w${wk}`] || 0) + amount;
+          });
+        }
+      });
+    };
+
+    processItems(lines, false);
+    processItems(unpaidInvoices, true);
+    
+    try {
+       await exportCustomWeeklyExcel(Array.from(linesMap.values()), { 
+         startWeek: effectiveStartWeek, 
+         endWeek: effectiveStartWeek + displayWeeks - 1 
+       });
+    } catch(e) { alert(e.message); }
+  };
+
+
   // Generar opciones de semanas para el selector de inicio
   const weekOptions = useMemo(() => {
     const opts = [{ value: 'current', label: `Semana Actual (Semana ${currentWeek})` }];
@@ -64,8 +164,6 @@ export default function WeeklyFlowChart({ lines = [], options, onOptionsChange, 
     }
     return opts;
   }, [currentWeek]);
-
-  const effectiveStartWeek = startWeek === 'current' ? currentWeek : parseInt(startWeek);
 
   const setDisplayWeeks = (val) => onOptionsChange({ ...options, displayWeeks: val });
   const setStartWeek = (val) => onOptionsChange({ ...options, startWeek: val });
@@ -80,68 +178,78 @@ export default function WeeklyFlowChart({ lines = [], options, onOptionsChange, 
     setExpandedWeeks(newExpanded);
   };
 
-  const aggregatedData = useMemo(() => {
-    // 1. Las líneas ya vienen filtradas desde App.jsx
-    let filteredLines = lines;
-
-    // 2. Inicializar semanas
+  const { aggregatedData } = useMemo(() => {
+    // 1. Inicializar semanas
     const weeksMap = Array(52).fill(0).map((_, i) => ({
       semana: i + 1,
-      presupuestado: 0,
-      ejecutado: 0,
-      lines: [] // Líneas que contribuyen a esta semana
+      monto: 0,
+      lines: []
     }));
 
-    // 3. Asignar líneas a semanas
-    filteredLines.forEach(line => {
-      MONTH_FIELDS.forEach((m, monthIndex) => {
-        const amount = line[m.key] || 0;
-        if (amount === 0) return;
+    if (viewMode === 'presupuesto') {
+      // PROCESAR PRESUPUESTO
+      lines.forEach(line => {
+        MONTH_FIELDS.forEach((m, monthIndex) => {
+          const amount = line[m.key] || 0;
+          if (amount <= 0) return;
 
-        let weekNumber;
-        // Si tiene un día específico para este mes (de BudgetForm)
-        if (line[m.dateKey]) {
-          const day = parseInt(line[m.dateKey]);
-          const date = new Date(2026, monthIndex, day);
-          weekNumber = getCurrentWeek(date) - 1;
-        } 
-        // Si es una línea de Excel original con fecha serial única
-        else if (line.fecha && typeof line.fecha === 'number') {
-          const date = new Date((line.fecha - 25569) * 86400 * 1000);
-          
-          if (date.getMonth() === monthIndex) {
+          let weekNumber;
+          if (line[m.dateKey]) {
+            const day = parseInt(line[m.dateKey]);
+            const date = new Date(2026, monthIndex, day);
             weekNumber = getCurrentWeek(date) - 1;
+          } else if (line.fecha && typeof line.fecha === 'number') {
+            const date = new Date((line.fecha - 25569) * 86400 * 1000);
+            if (date.getMonth() === monthIndex) {
+              weekNumber = getCurrentWeek(date) - 1;
+            } else {
+              const lastDay = new Date(2026, monthIndex + 1, 0).getDate();
+              const defaultDate = new Date(2026, monthIndex, lastDay);
+              weekNumber = getCurrentWeek(defaultDate) - 1;
+            }
           } else {
-            // Fallback al último día del mes
             const lastDay = new Date(2026, monthIndex + 1, 0).getDate();
             const defaultDate = new Date(2026, monthIndex, lastDay);
             weekNumber = getCurrentWeek(defaultDate) - 1;
           }
-        } 
-        // Por defecto: último día del mes correspondiente
-        else {
-          const lastDay = new Date(2026, monthIndex + 1, 0).getDate();
-          const defaultDate = new Date(2026, monthIndex, lastDay);
-          weekNumber = getCurrentWeek(defaultDate) - 1;
-        }
 
-        weekNumber = Math.max(0, Math.min(51, weekNumber));
-        weeksMap[weekNumber].presupuestado += amount;
-        
-        // Agregar línea al detalle de la semana (evitar duplicados si una línea afecta múltiples meses y cae en la misma semana?)
-        // En este presupuesto, una línea suele tener fecha única o distribución mensual.
-        // Si tiene fecha única, caerá en 1 semana. Si es mensual sín fecha, tomamos fin de mes.
-        // Para simplificar, agregamos la línea y el monto específico de ese mes.
-        weeksMap[weekNumber].lines.push({
-          ...line,
-          allocatedAmount: amount,
-          allocatedMonth: m.key
+          weekNumber = Math.max(0, Math.min(51, weekNumber));
+          weeksMap[weekNumber].monto += amount;
+          weeksMap[weekNumber].lines.push({
+            ...line,
+            allocatedAmount: amount,
+            isInvoice: false
+          });
         });
       });
-    });
+    } else {
+      // PROCESAR FACTURAS PENDIENTES
+      unpaidInvoices.forEach(inv => {
+         if (excludedInvoices.has(inv.id_movimiento)) return;
+         
+         const invAmt = parseFloat(inv.monto) || 0;
+         const date = new Date(inv.fecha_limite * 1000);
+         const weekNumber = Math.max(0, Math.min(51, getCurrentWeek(date) - 1));
+         
+         weeksMap[weekNumber].monto += invAmt;
+         weeksMap[weekNumber].lines.push({
+            id_movimiento: inv.id_movimiento,
+            proveedor: inv.proveedor,
+            ref: inv.ref,
+            area: 'Factura Dolibarr',
+            nombreElemento: `${inv.ref || 'Factura'} - ${inv.proveedor}`,
+            cuenta: inv.ref,
+            allocatedAmount: invAmt,
+            isInvoice: true
+         });
+      });
+    }
 
-    return weeksMap.filter(w => w.semana >= effectiveStartWeek && w.semana < effectiveStartWeek + displayWeeks);
-  }, [lines, displayWeeks, effectiveStartWeek]);
+    return { 
+      aggregatedData: weeksMap.filter(w => w.semana >= effectiveStartWeek && w.semana < effectiveStartWeek + displayWeeks)
+    };
+  }, [lines, displayWeeks, effectiveStartWeek, viewMode, unpaidInvoices, excludedInvoices]);
+
 
   return (
     <div className="fade-in">
@@ -181,8 +289,38 @@ export default function WeeklyFlowChart({ lines = [], options, onOptionsChange, 
               width={160}
             />
           </div>
+          
+          <div style={{ display: 'flex', gap: 10, marginLeft: 'auto' }}>
+            <div className="segmented-control" style={{ background: '#f1f5f9', padding: 4, borderRadius: 8, display: 'flex', gap: 4 }}>
+               <button 
+                 className={`btn btn-sm ${viewMode === 'presupuesto' ? 'btn-primary' : ''}`} 
+                 style={viewMode !== 'presupuesto' ? { background: 'transparent', border: 'none', color: '#64748b' } : {}}
+                 onClick={() => setViewMode('presupuesto')}
+               >
+                 Presupuesto
+               </button>
+               <button 
+                 className={`btn btn-sm ${viewMode === 'facturas' ? 'btn-primary' : ''}`}
+                 style={viewMode !== 'facturas' ? { background: 'transparent', border: 'none', color: '#64748b' } : {}}
+                 onClick={() => setViewMode('facturas')}
+               >
+                 Facturas Dolibarr
+               </button>
+            </div>
+            
+            {viewMode === 'facturas' && unpaidInvoices.length === 0 && (
+               <button className="btn btn-outline" onClick={loadUnpaidInvoices} disabled={loadingInvoices}>
+                 {loadingInvoices ? 'Cargando...' : 'Cargar de Dolibarr'}
+               </button>
+            )}
+            
+            <button className="btn btn-primary btn-icon" onClick={handleExport}>
+              <Download size={16} /> Exportar
+            </button>
+          </div>
         </div>
       </div>
+
 
       {/* Gráfico (Mismo código anterior) */}
       <div className="chart-card">
@@ -192,7 +330,7 @@ export default function WeeklyFlowChart({ lines = [], options, onOptionsChange, 
             <XAxis dataKey="semana" tickFormatter={(v) => `Sem ${v}`} tick={{ fontSize: 10 }} axisLine={false} />
             <YAxis tickFormatter={(v) => formatCurrency(v)} tick={{ fontSize: 10 }} axisLine={false} />
             <Tooltip content={<CustomTooltip />} />
-            <Bar dataKey="presupuestado" fill="var(--primary-color)" opacity={0.7} radius={[4, 4, 0, 0]} />
+            <Bar dataKey="monto" fill="var(--primary-color)" radius={[4, 4, 0, 0]} />
           </ComposedChart>
         </ResponsiveContainer>
       </div>
@@ -208,8 +346,7 @@ export default function WeeklyFlowChart({ lines = [], options, onOptionsChange, 
               <tr>
                 <th style={{ width: 40 }}></th>
                 <th>Semana / Rango</th>
-                <th style={{ textAlign: 'right' }}>Presupuestado</th>
-                <th style={{ textAlign: 'right' }}>Diferencia</th>
+                <th style={{ textAlign: 'right' }}>Monto {viewMode === 'presupuesto' ? 'Presupuestado' : 'Pendiente'}</th>
               </tr>
             </thead>
             <tbody>
@@ -226,8 +363,7 @@ export default function WeeklyFlowChart({ lines = [], options, onOptionsChange, 
                       <div style={{ fontWeight: 600 }}>Semana {d.semana}</div>
                       <div className="text-xs text-muted">{getWeekRange(d.semana)}</div>
                     </td>
-                    <td className="amount-cell">{formatCurrency(d.presupuestado)}</td>
-                    <td className="amount-cell">{formatCurrency(d.presupuestado - d.ejecutado)}</td>
+                    <td className="amount-cell" style={{ fontWeight: 600 }}>{formatCurrency(d.monto)}</td>
                   </tr>
                   
                   {expandedWeeks.has(d.semana) && (
@@ -239,34 +375,48 @@ export default function WeeklyFlowChart({ lines = [], options, onOptionsChange, 
                               <tr>
                                 <th>Área</th>
                                 <th>Nombre del Elemento</th>
-                                <th>Cuenta</th>
                                 <th style={{ textAlign: 'right' }}>Monto Semanal</th>
-                                <th style={{ width: 40 }}></th>
+                                <th style={{ width: 80 }}>Acciones</th>
                               </tr>
                             </thead>
                             <tbody>
-                              {d.lines.map((line, idx) => (
-                                <tr key={`${line.id}-${idx}`}>
-                                  <td><span className="badge badge-outline">{line.area}</span></td>
-                                  <td style={{ fontSize: '0.75rem' }}>{line.nombreElemento}</td>
-                                  <td style={{ fontSize: '0.75rem', color: '#64748b' }}>{line.cuenta}</td>
-                                  <td style={{ textAlign: 'right', fontWeight: 500 }}>
-                                    {formatCurrency(line.allocatedAmount)}
-                                  </td>
-                                  <td>
-                                    <button 
-                                      className="btn-icon-sm" 
-                                      onClick={(e) => {
-                                        e.stopPropagation();
-                                        onEdit(line);
-                                      }}
-                                      title="Editar línea"
-                                    >
-                                      <Edit2 size={12} />
-                                    </button>
-                                  </td>
-                                </tr>
-                              ))}
+                                {d.lines.filter(l => l.allocatedAmount > 0).map((line, idx) => (
+                                  <tr key={`${line.id || line.id_movimiento || idx}-${idx}`} style={line.isInvoice ? { background: '#fffbeb' } : {}}>
+                                    <td><span className="badge badge-outline" style={line.isInvoice ? { borderColor: '#d97706', color: '#d97706' } : {}}>{line.area}</span></td>
+                                    <td style={{ fontSize: '0.75rem' }}>{line.nombreElemento}</td>
+                                    <td style={{ textAlign: 'right', fontWeight: 500 }}>
+                                      {formatCurrency(line.allocatedAmount)}
+                                    </td>
+                                    <td>
+                                      <div style={{ display: 'flex', gap: 6 }}>
+                                        {line.isInvoice ? (
+                                           <button 
+                                             className="btn-icon-sm" 
+                                             onClick={(e) => {
+                                               e.stopPropagation();
+                                               toggleExclude(line.id_movimiento);
+                                             }}
+                                             title="Descartar del flujo"
+                                             style={{ color: '#ef4444' }}
+                                           >
+                                             <X size={12} />
+                                           </button>
+                                        ) : (
+                                          <button 
+                                            className="btn-icon-sm" 
+                                            onClick={(e) => {
+                                              e.stopPropagation();
+                                              onEdit(line);
+                                            }}
+                                            title="Editar línea"
+                                          >
+                                            <Edit2 size={12} />
+                                          </button>
+                                        )}
+                                      </div>
+                                    </td>
+                                  </tr>
+                                ))}
                             </tbody>
                           </table>
                         </div>
@@ -281,6 +431,31 @@ export default function WeeklyFlowChart({ lines = [], options, onOptionsChange, 
       </div>
 
       <style jsx>{`
+        .segmented-control {
+          background: #f1f5f9;
+          padding: 4px;
+          border-radius: 10px;
+          display: flex;
+          box-shadow: inset 0 1px 3px rgba(0,0,0,0.05);
+        }
+        .segmented-control button {
+          border: none;
+          padding: 6px 16px;
+          border-radius: 7px;
+          font-size: 0.85rem;
+          font-weight: 500;
+          cursor: pointer;
+          transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+        .segmented-control button.btn-primary {
+          background: white;
+          color: var(--primary-color);
+          box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1), 0 2px 4px -1px rgba(0,0,0,0.06);
+        }
+        .segmented-control button:hover:not(.btn-primary) {
+          background: rgba(255,255,255,0.5);
+        }
+        
         .row-clickable { 
           cursor: pointer; 
           transition: background 0.2s;
@@ -330,18 +505,6 @@ export default function WeeklyFlowChart({ lines = [], options, onOptionsChange, 
         }
         .btn-icon-sm:hover {
           background: #f1f5f9;
-        }
-        .filter-info-banner {
-          background: rgba(46, 49, 146, 0.05);
-          padding: 10px 16px;
-          border-radius: 8px;
-          margin-bottom: 20px;
-          display: flex;
-          align-items: center;
-          gap: 10px;
-          font-size: 0.8rem;
-          color: var(--primary-color);
-          border: 1px solid rgba(46, 49, 146, 0.1);
         }
       `}</style>
     </div>

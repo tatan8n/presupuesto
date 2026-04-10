@@ -627,6 +627,7 @@ async function syncDolibarr(dolibarrConfig) {
         tipo_documento: 'informe_gastos',
         // Mapear campos específicos de expense reports
         datef: rep.date_create || rep.datef || '',
+        total_ht: rep.total_ht || rep.total_ttc || rep.total || 0,
         total_ttc: rep.total_ttc || rep.total || 0,
         socname: rep.user_author || rep.nom || '',
       });
@@ -662,6 +663,7 @@ async function syncDolibarr(dolibarrConfig) {
 
     const ejecutadoPorLinea = {};
     movements.forEach(m => {
+      if (m.tipo_documento === 'orden_compra') return; // Avoid double counting
       const targetId = m.id_linea_presupuesto_uuid;
       if (!ejecutadoPorLinea[targetId]) ejecutadoPorLinea[targetId] = 0;
       ejecutadoPorLinea[targetId] += m.monto;
@@ -696,6 +698,94 @@ async function syncDolibarr(dolibarrConfig) {
     log(`[Sync] Error during sync: ${error.message}`);
     throw error;
   }
+}
+
+async function getThirdpartyMap(invoices, cfg) {
+  const socIds = [...new Set(invoices.map(i => i.socid || i.fk_soc || i.socid_facture || i.thirdparty?.id).filter(Boolean))];
+  let baseUrl = cfg.url.replace(/\/$/, '');
+  if (!baseUrl.endsWith('api/index.php')) baseUrl = `${baseUrl}/api/index.php`;
+  
+  const headers = { 'DOLAPIKEY': cfg.apiKey, 'Accept': 'application/json' };
+  const tpMap = {};
+  
+  for (let i = 0; i < socIds.length; i += 5) {
+     const batch = socIds.slice(i, i + 5);
+     await Promise.all(batch.map(async id => {
+        try {
+           const res = await fetch(`${baseUrl}/thirdparties/${id}`, { headers });
+           if (res.ok) {
+              const data = await res.json();
+              tpMap[id] = data.name || data.nom || data.name_alias || data.company || '';
+           }
+        } catch (e) {
+           console.log(`[Dolibarr] Error fetch thirdparty ${id}:`, e.message);
+        }
+     }));
+  }
+  return tpMap;
+}
+
+/**
+ * Obtiene las facturas pendientes de pago desde Dolibarr hasta una semana en particular.
+ */
+async function getUnpaidInvoices(endWeek, dolibarrConfig) {
+  const cfg = dolibarrConfig || config.dolibarr;
+  if (!cfg || !cfg.url || !cfg.apiKey) return [];
+  
+  const invoices = await fetchInvoices(cfg);
+  
+  // Filtrar pendientes de pago (statut=1 o paye=0)
+  const unpaidInvoices = invoices.filter(inv => {
+     return String(inv.statut) === '1';
+  });
+
+  // Mapear Nombres de Terceros
+  const tpMap = await getThirdpartyMap(unpaidInvoices, cfg);
+  
+  // Mapear al modelo
+  return unpaidInvoices.map(inv => {
+     const socid = inv.socid || inv.fk_soc || inv.socid_facture || inv.thirdparty?.id;
+     const fetchedName = socid ? tpMap[socid] : '';
+     
+     // Construcción robusta del nombre del proveedor
+     let proveedorCandidate = inv.socname || 
+                       inv.nom || 
+                       fetchedName || 
+                       inv.thirdparty?.name || 
+                       inv.thirdparty?.nom || 
+                       inv.name || 
+                       inv.display_name;
+
+     const proveedor = proveedorCandidate || (socid ? `ID_TERCERO:${socid}` : 'DESCONOCIDO_POR_API');
+
+     if (String(inv.ref).includes('7035') || String(inv.id) === '7035') {
+         console.log('--- DEBUG INVOICE 7035 ---');
+         console.log('IDs found:', { socid: inv.socid, fk_soc: inv.fk_soc, socid_facture: inv.socid_facture });
+         console.log('Names found:', { socname: inv.socname, nom: inv.nom, fetchedName });
+         console.log('Final proveedor result:', proveedor);
+         console.log('--------------------------');
+     }
+
+     return {
+       id_movimiento: inv.id || inv.ref || '',
+       proveedor: proveedor,
+       fecha_limite: inv.date_lim_reglement || inv.datep || inv.date || '',
+       monto: parseFloat(inv.total_ht) || parseFloat(inv.total_ttc) || 0, // Importe sin IVA
+       moneda: inv.multicurrency_code || 'COP',
+       // Extraemos si ya tiene linea de ppto vinculada
+       id_linea_presupuesto: inv.array_options?.options_ppto || '',
+       ref: inv.ref || '',
+     }
+  }).filter(inv => {
+     if (!endWeek) return true;
+     if (!inv.fecha_limite) return true;
+     // Filtrar facturas que venzan dentro de las semanas seleccionadas
+     const date = new Date(inv.fecha_limite * 1000);
+     const startOfYear = new Date(2026, 0, 1);
+     const diff = date - startOfYear;
+     const weekNumber = Math.floor(diff / (7 * 24 * 60 * 60 * 1000));
+     return weekNumber <= parseInt(endWeek);
+  });
 }
 
 /**
@@ -737,6 +827,7 @@ async function getMonthlyData(filters = {}) {
     const year = config.dolibarr?.year || '2026';
     const movs = await supabaseRepository.getMovements(year);
     movs.forEach(mov => {
+      if (mov.tipo_documento === 'orden_compra') return; // Exclude orders from executed amount
       if (!mov.fecha_documento) return;
       const mesNum = new Date(mov.fecha_documento).getMonth(); // 0-based
       movimientosPorMes[mesNum] = (movimientosPorMes[mesNum] || 0) + (parseFloat(mov.monto) || 0);
@@ -1023,4 +1114,5 @@ module.exports = {
   rejectTransfer,
   deleteTransfer,
   updateTransfer,
+  getUnpaidInvoices,
 };

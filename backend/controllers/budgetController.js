@@ -100,6 +100,17 @@ router.get('/weekly-flow', async (req, res) => {
   }
 });
 
+/** POST /api/budget/unpaid-invoices — Facturas pendientes de pago de Dolibarr */
+router.post('/unpaid-invoices', async (req, res) => {
+  try {
+    const { endWeek, dolibarrConfig } = req.body;
+    const data = await budgetService.getUnpaidInvoices(endWeek, dolibarrConfig);
+    res.json(data);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 /** GET /api/budget/filters — Opciones de filtros disponibles */
 router.get('/filters', async (req, res) => {
   try {
@@ -136,6 +147,22 @@ router.get('/export-weekly', async (req, res) => {
     const buffer = await budgetService.exportWeeklyExcel(filters, options);
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
     res.setHeader('Content-Disposition', 'attachment; filename=FlujoSemanal.xlsx');
+    res.send(buffer);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+/** POST /api/budget/export-weekly-custom — Descarga flujo con modificaciones custom (facturas unificadas) */
+router.post('/export-weekly-custom', async (req, res) => {
+  try {
+    const { customData, options } = req.body;
+    // customData ya viene pre-procesado del frontend con las filas exactas
+    const { generateCustomWeeklyCashFlowExcel } = require('../repositories/excelRepository');
+    const buffer = generateCustomWeeklyCashFlowExcel(customData, options);
+
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', 'attachment; filename=FlujoSemanal_Refinado.xlsx');
     res.send(buffer);
   } catch (error) {
     res.status(500).json({ error: error.message });

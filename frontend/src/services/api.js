@@ -133,6 +133,37 @@ export async function exportWeeklyExcel(filters = {}) {
   window.URL.revokeObjectURL(url);
 }
 
+/** Exporta el reporte semanal modificado (facturas deduplicadas). */
+export async function exportCustomWeeklyExcel(customData, options) {
+  const res = await fetch(`${API_BASE}/budget/export-weekly-custom`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ customData, options }),
+  });
+  if (!res.ok) throw new Error('Error al generar Excel custom');
+  
+  const blob = await res.blob();
+  const url = window.URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `FlujoSemanal_Refinado_${new Date().toISOString().split('T')[0]}.xlsx`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  window.URL.revokeObjectURL(url);
+}
+
+/** Fetch unpaid invoices matching up to the given endWeek. */
+export async function getUnpaidInvoices(endWeek, dolibarrConfig) {
+  const res = await fetch(`${API_BASE}/budget/unpaid-invoices`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ endWeek, dolibarrConfig })
+  });
+  if (!res.ok) throw new Error('Error al obtener facturas no pagadas');
+  return res.json();
+}
+
 /** Sincroniza movimientos desde Dolibarr. */
 export async function syncDolibarr(dolibarrConfig) {
   const res = await fetch(`${API_BASE}/budget/sync-dolibarr`, {

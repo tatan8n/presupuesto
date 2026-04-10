@@ -13,7 +13,7 @@ function createMovement(data) {
     fecha_documento: data.date || data.datef || '',
     tipo_documento: data.tipo_documento || 'factura_proveedor',
     proveedor: data.socname || data.nom || '',
-    monto: parseFloat(data.total_ttc) || parseFloat(data.total_ht) || 0,
+    monto: parseFloat(data.total_ht) || parseFloat(data.total_ttc) || 0,
     moneda: data.multicurrency_code || 'COP',
     estado_documento: data.statut || data.status || '',
   };
