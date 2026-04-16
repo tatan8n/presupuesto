@@ -15,27 +15,28 @@ function createMovement(data) {
 
   // Nombre del proveedor / tercero.
   // Dolibarr puede devolver el nombre en varios campos según el endpoint y la versión:
-  //   facturas/órdenes  → socname, name_alias, thirdparty.name, thirdparty_name, nom
-  //   informes de gastos → user_author (autor), paid_by ("Consignar a"), nom
+  //   facturas/órdenes  → socname (enriquecido via getThirdpartyMap), thirdparty.name, nom
+  //   informes de gastos → user_author_infos (nombre completo, campo más confiable)
   const proveedor =
     data.socname ||
     data.thirdparty?.name ||
     data.thirdparty_name ||
     data.name_alias ||
-    data.paid_by ||
+    data.user_author_infos ||
     data.user_author ||
     data.nom ||
     '';
 
   return {
     id_movimiento: idMovimiento,
-    ref_documento: refLegible,        // referencia legible (FA2026/00123)
+    ref_documento: refLegible,        // referencia legible (FA2026/00123, ER2604-XXXX)
     id_linea_presupuesto: budgetLineId,
     fecha_documento: data.date || data.datef || '',
     tipo_documento: data.tipo_documento || 'factura_proveedor',
     proveedor,
     monto: parseFloat(data.total_ht) || parseFloat(data.total_ttc) || 0,
     moneda: data.multicurrency_code || 'COP',
+    // `status` es el campo de estado en expensereports; `statut` en facturas/órdenes
     estado_documento: data.statut || data.status || data.fk_statut || '',
   };
 }

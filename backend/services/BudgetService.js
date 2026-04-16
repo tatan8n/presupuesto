@@ -630,16 +630,26 @@ async function syncDolibarr(dolibarrConfig) {
 
     // --- Informes de gastos (expense reports) ---
     expenseReports.forEach(rep => {
-      // REGLA DE NEGOCIO: Solo informes en estado Validado (4) o Pagado (5+).
-      // Los rechazados, cancelados o en borrador NO deben contar en la ejecución.
-      const statut = parseInt(rep.fk_statut || rep.statut || 0);
+      // REGLA DE NEGOCIO: Solo informes en estado Validado (4) o Pagado (5).
+      // IMPORTANTE: el campo de estado en Dolibarr expensereports es `status` (string),
+      // NO `fk_statut` ni `statut` (estos son undefined en la API de expense reports).
+      const statut = parseInt(rep.status || rep.fk_statut || rep.statut || 0);
       if (statut < 4) {
         log(`[Sync] Informe de gastos ignorado (estado ${statut} < 4): ${rep.ref || rep.id}`);
         return; // skip: estado no aprobado
       }
 
-      // Los informes de gastos usan date_create como fecha y total_ttc como monto
-      // El campo "Consignar a" en Dolibarr se mapea a `paid_by`; el autor es `user_author`
+      // Los informes de gastos usan date_create como fecha y total_ttc como monto.
+      // El campo "Consignar a" / autor se obtiene de `user_author_infos` (nombre completo).
+      // Si no existe, se usa `user_validator_infos` o `user_valid_infos` como fallback.
+      const autorNombre =
+        rep.user_author_infos ||
+        rep.user_validator_infos ||
+        rep.user_valid_infos ||
+        rep.user_author ||
+        rep.nom ||
+        '';
+
       const mov = createMovement({
         ...rep,
         tipo_documento: 'informe_gastos',
@@ -648,9 +658,9 @@ async function syncDolibarr(dolibarrConfig) {
         date: rep.date_create || rep.datef || '',
         total_ht: rep.total_ht || rep.total_ttc || rep.total || 0,
         total_ttc: rep.total_ttc || rep.total || 0,
-        // "Consignar a" → paid_by. Si no existe, usar el autor del informe
-        socname: rep.paid_by || rep.user_author || rep.nom || rep.firstname_user || '',
-        statut: rep.fk_statut || rep.statut,
+        // Usar el nombre resuelto del autor; socname es lo que toma createMovement
+        socname: autorNombre,
+        statut: statut,
       });
       if (!mov.id_linea_presupuesto) mov.id_linea_presupuesto = extractBudgetLineId(rep);
       if (mov.id_linea_presupuesto && idMap[mov.id_linea_presupuesto]) {
@@ -946,18 +956,26 @@ async function getUnassignedDocuments(dolibarrConfig) {
     });
 
     // Informes de gastos sin asignación — solo Validado (4) o Pagado (5)
+    // El campo de estado es `status` (string), no `fk_statut`/`statut` (undefined en la API).
     expenseReports.forEach(rep => {
-      const statut = parseInt(rep.fk_statut || rep.statut || 0);
+      const statut = parseInt(rep.status || rep.fk_statut || rep.statut || 0);
       if (statut < 4) return;
       const ref = extractBudgetRef(rep);
       if (!ref) {
+        // Nombre del autor: Dolibarr devuelve `user_author_infos` con el nombre completo
+        const autorNombre =
+          rep.user_author_infos ||
+          rep.user_validator_infos ||
+          rep.user_valid_infos ||
+          rep.user_author ||
+          rep.nom ||
+          '';
         unassigned.push({
           tipo: 'informe_gastos',
           ref: rep.ref || String(rep.id),
-          // "Consignar a" = paid_by; si no existe usar user_author
-          proveedor: rep.paid_by || rep.user_author || rep.nom || '',
+          proveedor: autorNombre,
           monto: parseFloat(rep.total_ht) || parseFloat(rep.total_ttc) || parseFloat(rep.total) || 0,
-          estado: String(rep.fk_statut || rep.statut || ''),
+          estado: String(rep.status || rep.fk_statut || rep.statut || ''),
           fecha: rep.date_create || rep.datef || '',
         });
       }
