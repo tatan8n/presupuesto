@@ -8,6 +8,7 @@ const config = require('../config');
 const supabaseRepository = require('../repositories/supabaseRepository');
 const fs = require('fs');
 const path = require('path');
+const { getExchangeRateToCOP, unixToDateStr } = require('../utils/currencyUtils');
 
 // Estado en memoria
 let movements = [];
@@ -609,14 +610,32 @@ async function syncDolibarr(dolibarrConfig) {
     };
 
     // --- Facturas de proveedor ---
-    invoices.forEach(inv => {
-      const mov = createMovement({ ...inv, tipo_documento: 'factura_proveedor', socname: enrichVendor(inv) });
+    for (const inv of invoices) {
+      let docData = { ...inv, tipo_documento: 'factura_proveedor', socname: enrichVendor(inv) };
+      
+      // Conversión rigurosa a TRM oficial si es moneda extranjera
+      if (inv.multicurrency_code && inv.multicurrency_code !== 'COP') {
+        const rawDate = inv.date_paye || inv.datep || inv.datef || inv.date;
+        let dateStr = typeof rawDate === 'number' ? unixToDateStr(rawDate) : (typeof rawDate === 'string' ? rawDate.split(' ')[0] : null);
+        if (!dateStr) dateStr = unixToDateStr(Math.floor(Date.now() / 1000));
+        
+        const rate = await getExchangeRateToCOP(inv.multicurrency_code, dateStr);
+        if (rate) {
+          docData.total_ht = (parseFloat(inv.multicurrency_total_ht) || 0) * rate;
+          docData.total_ttc = (parseFloat(inv.multicurrency_total_ttc) || 0) * rate;
+          log(`[Sync] Factura ${inv.ref} en ${inv.multicurrency_code}: Convertida a TRM ${rate} (Fecha: ${dateStr}) -> COP HT: ${docData.total_ht}`);
+        } else {
+          log(`[Sync] Factura ${inv.ref}: No se pudo obtener TRM para ${inv.multicurrency_code} en ${dateStr}. Usando cálculo de Dolibarr.`);
+        }
+      }
+
+      const mov = createMovement(docData);
       if (!mov.id_linea_presupuesto) mov.id_linea_presupuesto = extractBudgetLineId(inv);
       if (mov.id_linea_presupuesto && idMap[mov.id_linea_presupuesto]) {
         mov.id_linea_presupuesto_uuid = idMap[mov.id_linea_presupuesto];
         newMovements.push(mov);
       }
-    });
+    }
 
     // --- Órdenes de compra ---
     orders.forEach(ord => {
@@ -953,19 +972,33 @@ async function getUnassignedDocuments(dolibarrConfig) {
     };
 
     // Facturas de proveedor sin asignación
-    invoices.forEach(inv => {
+    for (const inv of invoices) {
       const ref = extractBudgetRef(inv);
       if (!ref) {
+        let monto = parseFloat(inv.total_ht) || parseFloat(inv.total_ttc) || 0;
+        
+        // Conversión rigurosa a TRM oficial si es moneda extranjera
+        if (inv.multicurrency_code && inv.multicurrency_code !== 'COP') {
+          const rawDate = inv.date_paye || inv.datep || inv.datef || inv.date;
+          let dateStr = typeof rawDate === 'number' ? unixToDateStr(rawDate) : (typeof rawDate === 'string' ? rawDate.split(' ')[0] : null);
+          if (!dateStr) dateStr = unixToDateStr(Math.floor(Date.now() / 1000));
+          
+          const rate = await getExchangeRateToCOP(inv.multicurrency_code, dateStr);
+          if (rate) {
+            monto = (parseFloat(inv.multicurrency_total_ht) || 0) * rate;
+          }
+        }
+
         unassigned.push({
           tipo: 'factura_proveedor',
           ref: inv.ref || String(inv.id),
           proveedor: enrichVendor(inv),
-          monto: parseFloat(inv.total_ht) || parseFloat(inv.total_ttc) || 0,
+          monto: monto,
           estado: String(inv.statut || inv.status || ''),
           fecha: inv.datef || inv.date || '',
         });
       }
-    });
+    }
 
     // Informes de gastos sin asignación — solo Validado (4) o Pagado (5)
     // El campo de estado es `status` (string), no `fk_statut`/`statut` (undefined en la API).
