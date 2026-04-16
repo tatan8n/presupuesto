@@ -872,7 +872,7 @@ async function getLineMovements(idLinea) {
   if (!line) throw new Error(`Línea ${idLinea} no encontrada.`);
 
   // Obtener los movimientos persistidos en Supabase para esta línea
-  const { data, error } = await supabaseRepository.supabase
+  let { data, error } = await supabaseRepository.supabase
     .from('budget_movements')
     .select('*')
     .eq('id_linea_presupuesto_uuid', idLinea)
@@ -880,6 +880,18 @@ async function getLineMovements(idLinea) {
     .order('fecha_documento', { ascending: false });
 
   if (error) throw error;
+
+  // Filtrar informes de gastos: solo permitimos Validado (4) o Pagado (5)
+  // Se excluyen borradores (<4) y rechazados (99)
+  if (data) {
+    data = data.filter(mov => {
+      if (mov.tipo_documento === 'informe_gastos') {
+        const statut = parseInt(mov.estado_documento || 0);
+        return statut >= 4 && statut <= 5;
+      }
+      return true;
+    });
+  }
 
   return {
     line: {
