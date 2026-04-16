@@ -14,11 +14,12 @@ import DolibarrConfig from './components/DolibarrConfig';
 import ICGIToggle from './components/ICGIToggle';
 import BudgetFilters from './components/BudgetFilters';
 import BudgetTransfers from './components/BudgetTransfers';
+import ExecutionModal from './components/ExecutionModal';
 import {
   loadDefaultBudget, uploadExcel, getKPIs, getMonthlyData,
   getWeeklyFlow, getFilterOptions, getBudgetLines,
   createBudgetLine, updateBudgetLine, deleteBudgetLine, restoreBudgetLine,
-  exportWeeklyExcel, syncDolibarr
+  exportWeeklyExcel, syncDolibarr, getUnassignedDocuments
 } from './services/api';
 import { getCurrentWeek } from './utils/dateUtils';
 import { Save, RefreshCw, Settings, Download, Clock, Menu } from 'lucide-react';
@@ -43,6 +44,10 @@ function App() {
   const [weeklyOptions, setWeeklyOptions] = useState({ displayWeeks: 12, filterEERR: false });
   // Estado para mostrar líneas eliminadas en la tabla de detalle
   const [showDeleted, setShowDeleted] = useState(false);
+  // Estado para la modal de ejecución
+  const [executionModalLine, setExecutionModalLine] = useState(null);
+  // Documentos sin asignación de línea de presupuesto
+  const [unassignedDocs, setUnassignedDocs] = useState(null);
   // Timestamp de última sincronización con Dolibarr
   const [lastSync, setLastSync] = useState(() => localStorage.getItem('lastDolibarrSync') || null);
   // Ref para el intervalo de auto-sync (persiste entre renders y navegación de vistas)
@@ -152,6 +157,23 @@ function App() {
   }, []);
 
   /**
+   * Carga documentos sin asignación desde Dolibarr.
+   * Se dispara tras sync o al cargar el dashboard si hay configuración guardada.
+   */
+  const loadUnassignedDocs = useCallback(async () => {
+    const savedConfig = localStorage.getItem('dolibarr_config');
+    if (!savedConfig) return;
+    try {
+      const cfg = JSON.parse(savedConfig);
+      if (!cfg.url || !cfg.apiKey) return;
+      const result = await getUnassignedDocuments(cfg);
+      setUnassignedDocs(result);
+    } catch (e) {
+      console.warn('[loadUnassignedDocs] Error:', e.message);
+    }
+  }, []);
+
+  /**
    * Carga líneas para la tabla de detalle.
    * Si showDeleted es true, incluye líneas eliminadas.
    */
@@ -219,6 +241,8 @@ function App() {
           loadAllLines(),
           loadEerrLines([1]),
         ]);
+        // Cargar docs sin asignar (no bloquea el init)
+        loadUnassignedDocs();
       } catch (error) {
         console.error('Error inicializando:', error);
         if (error.message.includes('servidor')) {
@@ -229,7 +253,7 @@ function App() {
       }
     };
     init();
-  }, [loadData, loadLines, loadAllLines, loadEerrLines]);
+  }, [loadData, loadLines, loadAllLines, loadEerrLines, loadUnassignedDocs]);
 
   // Recargar datos al cambiar filtros
   useEffect(() => {
@@ -465,6 +489,8 @@ function App() {
       setLastSync(now);
       localStorage.setItem('lastDolibarrSync', now);
       await Promise.all([loadData(filters), loadLines(filters, showDeleted), loadAllLines()]);
+      // Recargar docs sin asignar tras sync
+      loadUnassignedDocs();
       return result;
     } finally {
       setIsProcessing(false);
@@ -489,7 +515,7 @@ function App() {
       case 'dashboard':
         return (
           <>
-            <KPICards kpis={kpis} />
+            <KPICards kpis={kpis} unassignedDocs={unassignedDocs} />
             <div className="charts-grid">
               <AreaBarChart data={kpis?.byArea} onChartClick={handleChartClick} />
               <MonthlyLineChart data={monthlyData} onChartClick={handleChartClick} />
@@ -590,6 +616,7 @@ function App() {
             onRestore={handleRestore}
             showDeleted={showDeleted}
             onToggleShowDeleted={handleToggleShowDeleted}
+            onViewExecution={(line) => setExecutionModalLine(line)}
           />
         );
 
@@ -738,30 +765,80 @@ function App() {
       )}
 
       {lineToDelete && (
-        <div className="modal-overlay" style={{ zIndex: 10000 }}>
-          <div className="modal-content" style={{ maxWidth: 400, padding: 24 }}>
-            <h3 style={{ marginBottom: 12, display: 'flex', alignItems: 'center', gap: 8 }}>
-              Confirmar Eliminación
-            </h3>
-            <p style={{ fontSize: '0.95rem', color: 'var(--text-secondary)' }}>
-              Por favor, justifica la eliminación de la línea <strong>{lineToDelete.nombreElemento}</strong>.
-            </p>
-            <textarea
-              className="input-field"
-              value={deleteReason}
-              onChange={e => setDeleteReason(e.target.value)}
-              placeholder="Ej: Cancelación de evento, error de digitación..."
-              rows={3}
-              style={{ width: '100%', marginTop: 12, marginBottom: 20 }}
-            />
-            <div className="form-actions" style={{ justifyContent: 'flex-end', gap: 8 }}>
-              <button className="btn btn-outline" onClick={() => setLineToDelete(null)}>Cancelar</button>
-              <button className="btn" style={{ background: 'var(--danger)', color: 'white' }} onClick={confirmDelete} disabled={!deleteReason.trim()}>
-                Eliminar Línea
-              </button>
+        <div
+          className="modal-overlay"
+          style={{ zIndex: 10000 }}
+          onClick={(e) => { if (e.target === e.currentTarget) setLineToDelete(null); }}
+        >
+          <div style={{
+            background: '#ffffff',
+            borderRadius: 'var(--radius-lg)',
+            boxShadow: '0 20px 60px rgba(0,0,0,0.25)',
+            width: '95%',
+            maxWidth: 440,
+            padding: 0,
+            overflow: 'hidden',
+            animation: 'slideUp 0.25s ease',
+          }}>
+            {/* Franja de acento rojo superior */}
+            <div style={{ height: 4, background: 'linear-gradient(90deg, #E74C3C, #FF6B6B)' }} />
+            <div style={{ padding: '24px 28px' }}>
+              <h3 style={{
+                marginBottom: 8,
+                fontSize: '1.1rem',
+                fontWeight: 700,
+                color: '#1A1D3B',
+                display: 'flex',
+                alignItems: 'center',
+                gap: 8,
+              }}>
+                ⚠️ Confirmar Eliminación
+              </h3>
+              <p style={{ fontSize: '0.9rem', color: '#4B5563', lineHeight: 1.6, marginBottom: 4 }}>
+                ¿Deseas eliminar la línea
+                {' '}<strong style={{ color: '#1A1D3B' }}>{lineToDelete.nombreElemento}</strong>?
+                {' '}Esta acción es reversible.
+              </p>
+              <p style={{ fontSize: '0.82rem', color: '#6B7280', marginBottom: 16 }}>
+                Por favor ingresa el motivo de la eliminación:
+              </p>
+              <textarea
+                className="form-input"
+                value={deleteReason}
+                onChange={e => setDeleteReason(e.target.value)}
+                placeholder="Ej: Cancelación de evento, error de digitación..."
+                rows={3}
+                style={{ width: '100%', marginBottom: 20, resize: 'vertical', minHeight: 80 }}
+                autoFocus
+              />
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
+                <button
+                  className="btn btn-outline"
+                  onClick={() => setLineToDelete(null)}
+                  style={{ color: '#374151', borderColor: '#D1D5DB' }}
+                >
+                  Cancelar
+                </button>
+                <button
+                  className="btn btn-danger"
+                  onClick={confirmDelete}
+                  disabled={!deleteReason.trim()}
+                  style={{ opacity: deleteReason.trim() ? 1 : 0.5 }}
+                >
+                  Eliminar Línea
+                </button>
+              </div>
             </div>
           </div>
         </div>
+      )}
+
+      {/* Modal de ejecución por línea */}
+      {executionModalLine && (
+        <ExecutionModal
+          line={executionModalLine}
+          onClose={() => setExecutionModalLine(null)}
+        />
       )}
     </div>
   );

@@ -160,8 +160,10 @@ async function fetchExpenseReports(config) {
     baseUrl = `${baseUrl}/api/index.php`;
   }
 
-  // Filtramos por año de creación y status >= 4 (aprobado o superior)
-  const sqlFilters = `((t.date_create:>=:'${year}-01-01') AND (t.date_create:<=:'${year}-12-31') AND (t.fk_statut:>=:4))`;
+  // Solo informes en estado Validado (4) o Pagado (5).
+  // IMPORTANTE: status 99 (Rechazado) debe excluirse.
+  // fk_statut >= 4 incluiría 99 (rechazado), por eso usamos un rango explícito: 4 <= fk_statut <= 5.
+  const sqlFilters = `((t.date_create:>=:'${year}-01-01') AND (t.date_create:<=:'${year}-12-31') AND (t.fk_statut:>=:4) AND (t.fk_statut:<=:5))`;
 
   let allReports = [];
   let page = 0;

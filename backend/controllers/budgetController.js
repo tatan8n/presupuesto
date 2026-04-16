@@ -121,6 +121,20 @@ router.get('/filters', async (req, res) => {
   }
 });
 
+/** GET /api/budget/unassigned-docs — Documentos sin asignación de línea de presupuesto */
+router.get('/unassigned-docs', async (req, res) => {
+  try {
+    // Leer la configuración de Dolibarr desde el body del GET o de env
+    const dolibarrConfig = req.query.dolibarrConfig
+      ? JSON.parse(req.query.dolibarrConfig)
+      : null;
+    const result = await budgetService.getUnassignedDocuments(dolibarrConfig);
+    res.json(result);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // ==========================================
 // CRUD DE LÍNEAS
 // ==========================================
@@ -164,6 +178,16 @@ router.post('/export-weekly-custom', async (req, res) => {
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
     res.setHeader('Content-Disposition', 'attachment; filename=FlujoSemanal_Refinado.xlsx');
     res.send(buffer);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+/** GET /api/budget/:id/movements — Obtiene todos los movimientos (ejecución) de una línea */
+router.get('/:id/movements', async (req, res) => {
+  try {
+    const movements = await budgetService.getLineMovements(req.params.id);
+    res.json(movements);
   } catch (error) {
     res.status(500).json({ error: error.message });
   }

@@ -1074,3 +1074,9 @@ body.processing, body.processing * {
 @media (max-width: 768px) {
   .hide-on-mobile { display: none !important; }
 }
+
+@keyframes pulse {
+  0% { transform: scale(1); opacity: 1; }
+  50% { transform: scale(1.03); opacity: 0.9; }
+  100% { transform: scale(1); opacity: 1; }
+}

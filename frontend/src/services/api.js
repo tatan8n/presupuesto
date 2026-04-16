@@ -175,6 +175,24 @@ export async function syncDolibarr(dolibarrConfig) {
   return res.json();
 }
 
+/** Obtiene los movimientos de ejecución de una línea de presupuesto. */
+export async function getLineMovements(lineId) {
+  const res = await fetch(`${API_BASE}/budget/${lineId}/movements`);
+  if (!res.ok) throw new Error('Error al obtener movimientos de la línea');
+  return res.json();
+}
+
+/** Obtiene documentos sin asignación de línea de presupuesto. */
+export async function getUnassignedDocuments(dolibarrConfig) {
+  const params = new URLSearchParams();
+  if (dolibarrConfig) {
+    params.append('dolibarrConfig', JSON.stringify(dolibarrConfig));
+  }
+  const res = await fetch(`${API_BASE}/budget/unassigned-docs?${params}`);
+  if (!res.ok) throw new Error('Error al obtener documentos sin asignación');
+  return res.json();
+}
+
 // ==========================================
 // TRASLADOS DE PRESUPUESTO
 // ==========================================

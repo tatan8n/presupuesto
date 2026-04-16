@@ -599,9 +599,18 @@ async function syncDolibarr(dolibarrConfig) {
       return '';
     };
 
+    // Enriquecer facturas y órdenes con nombre del tercero (Dolibarr no lo incluye en el listado)
+    const allInvOrd = [...invoices, ...orders];
+    const tpMap = await getThirdpartyMap(allInvOrd, cfg).catch(() => ({}));
+
+    const enrichVendor = (doc) => {
+      const socid = doc.socid || doc.fk_soc || doc.socid_facture || doc.thirdparty?.id;
+      return tpMap[socid] || doc.socname || doc.thirdparty?.name || doc.nom || '';
+    };
+
     // --- Facturas de proveedor ---
     invoices.forEach(inv => {
-      const mov = createMovement({ ...inv, tipo_documento: 'factura_proveedor' });
+      const mov = createMovement({ ...inv, tipo_documento: 'factura_proveedor', socname: enrichVendor(inv) });
       if (!mov.id_linea_presupuesto) mov.id_linea_presupuesto = extractBudgetLineId(inv);
       if (mov.id_linea_presupuesto && idMap[mov.id_linea_presupuesto]) {
         mov.id_linea_presupuesto_uuid = idMap[mov.id_linea_presupuesto];
@@ -611,7 +620,7 @@ async function syncDolibarr(dolibarrConfig) {
 
     // --- Órdenes de compra ---
     orders.forEach(ord => {
-      const mov = createMovement({ ...ord, tipo_documento: 'orden_compra' });
+      const mov = createMovement({ ...ord, tipo_documento: 'orden_compra', socname: enrichVendor(ord) });
       if (!mov.id_linea_presupuesto) mov.id_linea_presupuesto = extractBudgetLineId(ord);
       if (mov.id_linea_presupuesto && idMap[mov.id_linea_presupuesto]) {
         mov.id_linea_presupuesto_uuid = idMap[mov.id_linea_presupuesto];
@@ -621,15 +630,27 @@ async function syncDolibarr(dolibarrConfig) {
 
     // --- Informes de gastos (expense reports) ---
     expenseReports.forEach(rep => {
+      // REGLA DE NEGOCIO: Solo informes en estado Validado (4) o Pagado (5+).
+      // Los rechazados, cancelados o en borrador NO deben contar en la ejecución.
+      const statut = parseInt(rep.fk_statut || rep.statut || 0);
+      if (statut < 4) {
+        log(`[Sync] Informe de gastos ignorado (estado ${statut} < 4): ${rep.ref || rep.id}`);
+        return; // skip: estado no aprobado
+      }
+
       // Los informes de gastos usan date_create como fecha y total_ttc como monto
+      // El campo "Consignar a" en Dolibarr se mapea a `paid_by`; el autor es `user_author`
       const mov = createMovement({
         ...rep,
         tipo_documento: 'informe_gastos',
         // Mapear campos específicos de expense reports
         datef: rep.date_create || rep.datef || '',
+        date: rep.date_create || rep.datef || '',
         total_ht: rep.total_ht || rep.total_ttc || rep.total || 0,
         total_ttc: rep.total_ttc || rep.total || 0,
-        socname: rep.user_author || rep.nom || '',
+        // "Consignar a" → paid_by. Si no existe, usar el autor del informe
+        socname: rep.paid_by || rep.user_author || rep.nom || rep.firstname_user || '',
+        statut: rep.fk_statut || rep.statut,
       });
       if (!mov.id_linea_presupuesto) mov.id_linea_presupuesto = extractBudgetLineId(rep);
       if (mov.id_linea_presupuesto && idMap[mov.id_linea_presupuesto]) {
@@ -642,19 +663,33 @@ async function syncDolibarr(dolibarrConfig) {
 
     // Persistir movimientos en Supabase para que la gráfica mensual use fechas reales
     try {
-      const movsParaSupabase = newMovements.map(m => ({
-        id: `${m.tipo_documento}_${m.id_movimiento}`,
-        id_linea_presupuesto_uuid: m.id_linea_presupuesto_uuid,
-        fecha_documento: m.fecha_documento
-          ? (() => { const d = new Date(m.fecha_documento * 1000); return isNaN(d) ? m.fecha_documento : d.toISOString().slice(0, 10); })()
-          : null,
-        tipo_documento: m.tipo_documento,
-        proveedor: m.proveedor,
-        monto: m.monto,
-        moneda: m.moneda,
-        estado_documento: String(m.estado_documento || ''),
-        ref: m.id_movimiento,
-      }));
+      const movsParaSupabase = newMovements.map(m => {
+        // La fecha puede ser un Unix timestamp (segundos) o una cadena 'YYYY-MM-DD'
+        let fechaDoc = null;
+        if (m.fecha_documento) {
+          const raw = m.fecha_documento;
+          if (typeof raw === 'number' || /^\d+$/.test(String(raw))) {
+            // Unix timestamp en segundos
+            const d = new Date(Number(raw) * 1000);
+            fechaDoc = isNaN(d) ? null : d.toISOString().slice(0, 10);
+          } else {
+            // Cadena tipo '2026-03-15' o similar
+            const d = new Date(raw);
+            fechaDoc = isNaN(d) ? null : d.toISOString().slice(0, 10);
+          }
+        }
+        return {
+          id: `${m.tipo_documento}_${m.id_movimiento}`,
+          id_linea_presupuesto_uuid: m.id_linea_presupuesto_uuid,
+          fecha_documento: fechaDoc,
+          tipo_documento: m.tipo_documento,
+          proveedor: m.proveedor || '',
+          monto: m.monto,
+          moneda: m.moneda,
+          estado_documento: String(m.estado_documento || ''),
+          ref: m.ref_documento || m.id_movimiento, // referencia legible del documento
+        };
+      });
       await supabaseRepository.upsertMovements(movsParaSupabase);
       log(`[Sync] ${movsParaSupabase.length} movimientos persistidos en Supabase.`);
     } catch (e) {
@@ -813,6 +848,131 @@ async function getFilterOptions() {
 
 async function getSyncLog() {
   return syncLog;
+}
+
+/**
+ * Obtiene los movimientos de ejecución de una línea de presupuesto específica.
+ * Consulta budget_movements por id_linea_presupuesto_uuid y enriquece con la línea.
+ * Solo incluye facturas y informes de gastos (NO órdenes de compra).
+ * @param {string} idLinea - UUID de la línea de presupuesto
+ * @returns {Promise<Array>} Lista de movimientos con detalle
+ */
+async function getLineMovements(idLinea) {
+  const line = await getBudgetLineById(idLinea);
+  if (!line) throw new Error(`Línea ${idLinea} no encontrada.`);
+
+  // Obtener los movimientos persistidos en Supabase para esta línea
+  const { data, error } = await supabaseRepository.supabase
+    .from('budget_movements')
+    .select('*')
+    .eq('id_linea_presupuesto_uuid', idLinea)
+    .neq('tipo_documento', 'orden_compra') // Órdenes de compra no cuentan en ejecución
+    .order('fecha_documento', { ascending: false });
+
+  if (error) throw error;
+
+  return {
+    line: {
+      id: line.id_linea,
+      idConsecutivo: line.idConsecutivo,
+      nombre: line.nombreElemento,
+      area: line.area,
+      totalPresupuesto: line.total,
+      ejecutadoAcumulado: line.ejecutadoAcumulado,
+    },
+    movements: (data || []).map(m => ({
+      id: m.id,
+      ref: m.ref,
+      tipo: m.tipo_documento,
+      proveedor: m.proveedor,
+      fecha: m.fecha_documento,
+      monto: parseFloat(m.monto) || 0,
+      estado: m.estado_documento,
+    })),
+  };
+}
+
+/**
+ * Obtiene los documentos sin asignación de línea de presupuesto.
+ * Solo considera facturas de proveedor e informes de gastos (no órdenes de compra).
+ * Sincroniza directamente con Dolibarr para obtener datos frescos.
+ * @param {Object} dolibarrConfig - Configuración de Dolibarr
+ * @returns {Promise<Object>} Total de documentos y monto sin asignar
+ */
+async function getUnassignedDocuments(dolibarrConfig) {
+  const cfg = dolibarrConfig || config.dolibarr;
+  if (!cfg || !cfg.url || !cfg.apiKey) {
+    return { count: 0, total: 0, items: [] };
+  }
+
+  try {
+    const [invoices, expenseReports] = await Promise.all([
+      fetchInvoices(cfg),
+      fetchExpenseReports(cfg),
+    ]);
+
+    const extractBudgetRef = (doc) => {
+      if (doc.array_options?.options_ppto) return String(doc.array_options.options_ppto).trim();
+      if (doc.lines) {
+        for (const line of doc.lines) {
+          if (line.array_options?.options_ppto) return String(line.array_options.options_ppto).trim();
+        }
+      }
+      return '';
+    };
+
+    const unassigned = [];
+
+    // Enriquecer facturas con nombre del tercero
+    const tpMap = await getThirdpartyMap(invoices, cfg).catch(() => ({}));
+    const enrichVendor = (doc) => {
+      const socid = doc.socid || doc.fk_soc || doc.thirdparty?.id;
+      return tpMap[socid] || doc.socname || doc.thirdparty?.name || doc.nom || '';
+    };
+
+    // Facturas de proveedor sin asignación
+    invoices.forEach(inv => {
+      const ref = extractBudgetRef(inv);
+      if (!ref) {
+        unassigned.push({
+          tipo: 'factura_proveedor',
+          ref: inv.ref || String(inv.id),
+          proveedor: enrichVendor(inv),
+          monto: parseFloat(inv.total_ht) || parseFloat(inv.total_ttc) || 0,
+          estado: String(inv.statut || inv.status || ''),
+          fecha: inv.datef || inv.date || '',
+        });
+      }
+    });
+
+    // Informes de gastos sin asignación — solo Validado (4) o Pagado (5)
+    expenseReports.forEach(rep => {
+      const statut = parseInt(rep.fk_statut || rep.statut || 0);
+      if (statut < 4) return;
+      const ref = extractBudgetRef(rep);
+      if (!ref) {
+        unassigned.push({
+          tipo: 'informe_gastos',
+          ref: rep.ref || String(rep.id),
+          // "Consignar a" = paid_by; si no existe usar user_author
+          proveedor: rep.paid_by || rep.user_author || rep.nom || '',
+          monto: parseFloat(rep.total_ht) || parseFloat(rep.total_ttc) || parseFloat(rep.total) || 0,
+          estado: String(rep.fk_statut || rep.statut || ''),
+          fecha: rep.date_create || rep.datef || '',
+        });
+      }
+    });
+
+    const totalMonto = unassigned.reduce((sum, d) => sum + d.monto, 0);
+    return {
+      count: unassigned.length,
+      total: totalMonto,
+      items: unassigned,
+    };
+  } catch (error) {
+    console.error('[getUnassignedDocuments] Error:', error.message);
+    return { count: 0, total: 0, items: [] };
+  }
 }
 
 /**
@@ -1107,6 +1267,8 @@ module.exports = {
   getFilterOptions,
   getSyncLog,
   getMonthlyData,
+  getLineMovements,
+  getUnassignedDocuments,
   // Traslados
   createTransfer,
   listTransfers,

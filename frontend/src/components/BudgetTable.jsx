@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { Pencil, Trash2, RotateCcw, Plus, ChevronLeft, ChevronRight, Eye, EyeOff, ChevronUp, ChevronDown, Columns } from 'lucide-react';
+import { Pencil, Trash2, RotateCcw, Plus, ChevronLeft, ChevronRight, Eye, EyeOff, ChevronUp, ChevronDown, Columns, List } from 'lucide-react';
 import { formatCurrencyFull, formatPercentage } from '../utils/formatters';
 
 // ──────────────────────────────────────────────
@@ -54,7 +54,7 @@ function sortLines(arr, sortKey, sortDir) {
 // ──────────────────────────────────────────────
 // Componente principal
 // ──────────────────────────────────────────────
-export default function BudgetTable({ lines, filters, onEdit, onDelete, onCreate, onRestore, showDeleted, onToggleShowDeleted }) {
+export default function BudgetTable({ lines, filters, onEdit, onDelete, onCreate, onRestore, showDeleted, onToggleShowDeleted, onViewExecution }) {
   // ── Paginación persistente ──
   const [currentPage, setCurrentPage] = useState(1);
   const [itemsPerPage, setItemsPerPage] = useState(() =>
@@ -377,12 +377,12 @@ export default function BudgetTable({ lines, filters, onEdit, onDelete, onCreate
             {displayCols.map(col => (
               <col key={col.key} style={{ width: colWidths[col.key] || col.width }} />
             ))}
-            <col style={{ width: 80 }} />
+            <col style={{ width: 110 }} />
           </colgroup>
           <thead>
             <tr>
               {displayCols.map(col => renderTh(col))}
-              <th style={{ textAlign: 'center', width: 80 }}>Acciones</th>
+              <th style={{ textAlign: 'center', width: 110 }}>Acciones</th>
             </tr>
           </thead>
           <tbody>
@@ -404,7 +404,7 @@ export default function BudgetTable({ lines, filters, onEdit, onDelete, onCreate
                     }}
                   >
                     {displayCols.map(col => renderCell(col, line))}
-                    <td style={{ textAlign: 'center', width: 80 }}>
+                    <td style={{ textAlign: 'center', width: 110, whiteSpace: 'nowrap' }}>
                       {isDeleted ? (
                         <button
                           className="btn btn-ghost btn-icon btn-sm"
@@ -416,6 +416,15 @@ export default function BudgetTable({ lines, filters, onEdit, onDelete, onCreate
                         </button>
                       ) : (
                         <>
+                          {/* Botón ver ejecución */}
+                          <button
+                            className="btn btn-ghost btn-icon btn-sm"
+                            onClick={() => onViewExecution && onViewExecution(line)}
+                            title="Ver documentos de ejecución"
+                            style={{ color: 'var(--teal)' }}
+                          >
+                            <List style={{ width: 14, height: 14 }} />
+                          </button>
                           <button className="btn btn-ghost btn-icon btn-sm" onClick={() => onEdit(line)} title="Editar">
                             <Pencil style={{ width: 14, height: 14 }} />
                           </button>
