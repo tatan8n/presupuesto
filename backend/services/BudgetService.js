@@ -1,4 +1,6 @@
-const { readBudgetFromExcel, writeBudgetToExcel, generateWeeklyCashFlowExcel } = require('../repositories/excelRepository');
+/**
+ * BudgetService.js - Versión: conversion moneda
+ */
 const { fetchInvoices, fetchPurchaseOrders, fetchExpenseReports } = require('../repositories/dolibarrRepository');
 const { createBudgetLine, recalculateLine } = require('../models/BudgetLine');
 const { createMovement } = require('../models/Movement');
