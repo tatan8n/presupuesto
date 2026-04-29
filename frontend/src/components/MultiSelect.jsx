@@ -1,7 +1,16 @@
 import { useState, useRef, useEffect, useMemo } from 'react';
 import { ChevronDown, Check, Search } from 'lucide-react';
 
-export default function MultiSelect({ options, value = [], onChange, placeholder, label, id }) {
+export default function MultiSelect({ options, value = [], onChange, placeholder, label, id, renderLabel, width }) {
+  /**
+   * Resuelve la etiqueta visible de una opción.
+   * Si renderLabel está definido, lo usa (permite mostrar nombres amigables para UUIDs, etc.).
+   * Si no, aplica la lógica por defecto (números → "Escenario N", strings → tal cual).
+   */
+  const getLabel = (opt) => {
+    if (renderLabel) return renderLabel(opt);
+    return typeof opt === 'number' ? `Escenario ${opt}` : String(opt);
+  };
   const [isOpen, setIsOpen] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
   const containerRef = useRef(null);
@@ -39,7 +48,7 @@ export default function MultiSelect({ options, value = [], onChange, placeholder
   const displayLabel = label || placeholder || 'Filtro';
 
   const displayValue = value.length === 0 ? displayLabel : 
-                       value.length === 1 ? (typeof value[0] === 'number' ? `Escenario ${value[0]}` : value[0]) : 
+                       value.length === 1 ? getLabel(value[0]) : 
                        value.length === options.length ? displayLabel :
                        `${value.length} seleccionadas`;
 
@@ -47,14 +56,13 @@ export default function MultiSelect({ options, value = [], onChange, placeholder
     if (!searchTerm) return options;
     const lowerSearch = searchTerm.toLowerCase();
     return options.filter(opt => 
-      String(typeof opt === 'number' ? `Escenario ${opt}` : opt)
-      .toLowerCase()
-      .includes(lowerSearch)
+      getLabel(opt).toLowerCase().includes(lowerSearch)
     );
-  }, [options, searchTerm]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [options, searchTerm, renderLabel]);
 
   return (
-    <div className="multi-select" ref={containerRef} style={{ position: 'relative', minWidth: 220 }}>
+    <div className="multi-select" ref={containerRef} style={{ position: 'relative', minWidth: width || 220, width: width }}>
       {/* Target button */}
       <button 
         id={id}
@@ -115,7 +123,7 @@ export default function MultiSelect({ options, value = [], onChange, placeholder
             ) : (
               filteredOptions.map(opt => {
                 const isSelected = value.includes(opt);
-                const label = typeof opt === 'number' ? `Escenario ${opt}` : opt;
+                const label = getLabel(opt);
                 return (
                   <div 
                     key={opt}

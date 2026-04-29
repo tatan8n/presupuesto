@@ -622,12 +622,11 @@ function App() {
 
       case 'semanal':
         return (
-          <WeeklyFlowChart
+        <WeeklyFlowChart
             lines={budgetLines}
             filters={filters}
             options={weeklyOptions}
             onOptionsChange={setWeeklyOptions}
-            onEdit={handleEdit}
           />
         );
 
@@ -746,7 +745,8 @@ function App() {
             <BudgetFilters 
               filters={filters} 
               filterOptions={filterOptions} 
-              onFilterChange={handleFilterChange} 
+              onFilterChange={handleFilterChange}
+              budgetLines={allBudgetLines}
             />
           )}
 

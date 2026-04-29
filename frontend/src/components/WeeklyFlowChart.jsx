@@ -5,8 +5,9 @@ import {
 } from 'recharts';
 import { formatCurrency } from '../utils/formatters';
 import { getWeekRange, getCurrentWeek } from '../utils/dateUtils';
-import { Filter, Calendar, Info, ChevronDown, ChevronRight, Edit2, Download, AlertCircle, Check, X } from 'lucide-react';
+import { Filter, Calendar, Info, ChevronDown, ChevronRight, Download, AlertCircle, Check, X } from 'lucide-react';
 import SingleSelect from './SingleSelect';
+import MultiSelect from './MultiSelect';
 import { getUnpaidInvoices, exportCustomWeeklyExcel, exportWeeklyExcel } from '../services/api';
 
 function CustomTooltip({ active, payload, label }) {
@@ -48,7 +49,7 @@ const MONTH_FIELDS = [
   { key: 'diciembre', dateKey: 'fechaDiciembre', label: 'Diciembre' },
 ];
 
-export default function WeeklyFlowChart({ lines = [], options, onOptionsChange, onEdit }) {
+export default function WeeklyFlowChart({ lines = [], options, onOptionsChange }) {
   const { displayWeeks = 12, startWeek = 'current' } = options || {};
   const [expandedWeeks, setExpandedWeeks] = useState(new Set());
   const currentWeek = getCurrentWeek();
@@ -58,6 +59,58 @@ export default function WeeklyFlowChart({ lines = [], options, onOptionsChange, 
   const [unpaidInvoices, setUnpaidInvoices] = useState([]);
   const [loadingInvoices, setLoadingInvoices] = useState(false);
   const [excludedInvoices, setExcludedInvoices] = useState(new Set());
+
+  /**
+   * Estado local para el filtro de líneas de presupuesto individuales.
+   * Por defecto TODAS seleccionadas — el usuario va quitando lo que no quiere ver.
+   * Se sincroniza dinámicamente: las nuevas líneas que aparezcan por filtros globales
+   * se agregan automáticamente; las que desaparezcan se quitan.
+   */
+  const [selectedLineIds, setSelectedLineIds] = useState([]);
+
+  /**
+   * Opciones derivadas de las líneas actuales (ya filtradas por filtros globales).
+   * Formato de label: "#N - Nombre del Elemento" ordenado por número consecutivo.
+   */
+  const lineFilterOptions = useMemo(() => {
+    const seen = new Map();
+    lines.forEach(l => {
+      // No mostrar líneas eliminadas en este filtro local
+      if (l.estado === 'eliminada') return;
+
+      if (l.id_linea && l.nombreElemento && !seen.has(l.id_linea)) {
+        seen.set(l.id_linea, {
+          label: `#${l.idConsecutivo ?? '?'} - ${l.nombreElemento}`,
+          sortKey: l.idConsecutivo ?? 9999,
+        });
+      }
+    });
+    return Array.from(seen.entries())
+      .sort((a, b) => a[1].sortKey - b[1].sortKey)
+      .map(([id, { label }]) => ({ value: id, label }));
+  }, [lines]);
+
+  /**
+   * Sincroniza selectedLineIds con lineFilterOptions cada vez que cambian las líneas disponibles:
+   * - Agrega automáticamente las líneas nuevas (por cambio de filtro global) → comportamiento "todas activas"
+   * - Elimina las que ya no están disponibles (filtradas por otro criterio global)
+   * Así el usuario solo necesita QUITAR lo que no quiere ver.
+   */
+  useEffect(() => {
+    const availableIds = lineFilterOptions.map(o => o.value);
+    const availableSet = new Set(availableIds);
+    const selectedSet = new Set(selectedLineIds);
+
+    // Líneas nuevas que no están seleccionadas → agregarlas
+    const toAdd = availableIds.filter(id => !selectedSet.has(id));
+    // Líneas seleccionadas que ya no existen → quitarlas
+    const cleaned = selectedLineIds.filter(id => availableSet.has(id));
+
+    if (toAdd.length > 0 || cleaned.length !== selectedLineIds.length) {
+      setSelectedLineIds([...cleaned, ...toAdd]);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lineFilterOptions]);
 
   const toggleExclude = (idMovimiento) => {
     setExcludedInvoices(prev => {
@@ -187,8 +240,14 @@ export default function WeeklyFlowChart({ lines = [], options, onOptionsChange, 
     }));
 
     if (viewMode === 'presupuesto') {
+      // Filtrar líneas según selección local.
+      // Las líneas siempre están pre-populadas (todas seleccionadas por defecto).
+      // Si el usuario deseleccionó todo, selectedLineIds queda vacío y no se muestra nada.
+      const selectedSet = new Set(selectedLineIds);
+      const activeLines = lines.filter(l => selectedSet.has(l.id_linea));
+
       // PROCESAR PRESUPUESTO
-      lines.forEach(line => {
+      activeLines.forEach(line => {
         MONTH_FIELDS.forEach((m, monthIndex) => {
           const amount = line[m.key] || 0;
           if (amount <= 0) return;
@@ -248,7 +307,7 @@ export default function WeeklyFlowChart({ lines = [], options, onOptionsChange, 
     return { 
       aggregatedData: weeksMap.filter(w => w.semana >= effectiveStartWeek && w.semana < effectiveStartWeek + displayWeeks)
     };
-  }, [lines, displayWeeks, effectiveStartWeek, viewMode, unpaidInvoices, excludedInvoices]);
+  }, [lines, displayWeeks, effectiveStartWeek, viewMode, unpaidInvoices, excludedInvoices, selectedLineIds]);
 
 
   return (
@@ -289,6 +348,25 @@ export default function WeeklyFlowChart({ lines = [], options, onOptionsChange, 
               width={160}
             />
           </div>
+
+          {/* Filtro local de líneas de presupuesto (solo en modo presupuesto) */}
+          {viewMode === 'presupuesto' && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6, minWidth: 450 }}>
+              <span style={{ fontSize: '0.75rem', fontWeight: 600, color: '#6B7280', marginLeft: 4 }}>Líneas de presupuesto</span>
+              <MultiSelect
+                id="weekly-filter-lineas"
+                width={450}
+                options={lineFilterOptions.map(o => o.value)}
+                value={selectedLineIds}
+                onChange={setSelectedLineIds}
+                placeholder="Todas las líneas"
+                renderLabel={(val) => {
+                  const opt = lineFilterOptions.find(o => o.value === val);
+                  return opt ? opt.label : val;
+                }}
+              />
+            </div>
+          )}
           
           <div style={{ display: 'flex', gap: 10, marginLeft: 'auto' }}>
             <div className="segmented-control" style={{ background: '#f1f5f9', padding: 4, borderRadius: 8, display: 'flex', gap: 4 }}>
@@ -376,7 +454,7 @@ export default function WeeklyFlowChart({ lines = [], options, onOptionsChange, 
                                 <th>Área</th>
                                 <th>Nombre del Elemento</th>
                                 <th style={{ textAlign: 'right' }}>Monto Semanal</th>
-                                <th style={{ width: 80 }}>Acciones</th>
+                                <th style={{ width: 50 }}></th>
                               </tr>
                             </thead>
                             <tbody>
@@ -388,32 +466,19 @@ export default function WeeklyFlowChart({ lines = [], options, onOptionsChange, 
                                       {formatCurrency(line.allocatedAmount)}
                                     </td>
                                     <td>
-                                      <div style={{ display: 'flex', gap: 6 }}>
-                                        {line.isInvoice ? (
-                                           <button 
-                                             className="btn-icon-sm" 
-                                             onClick={(e) => {
-                                               e.stopPropagation();
-                                               toggleExclude(line.id_movimiento);
-                                             }}
-                                             title="Descartar del flujo"
-                                             style={{ color: '#ef4444' }}
-                                           >
-                                             <X size={12} />
-                                           </button>
-                                        ) : (
-                                          <button 
-                                            className="btn-icon-sm" 
-                                            onClick={(e) => {
-                                              e.stopPropagation();
-                                              onEdit(line);
-                                            }}
-                                            title="Editar línea"
-                                          >
-                                            <Edit2 size={12} />
-                                          </button>
-                                        )}
-                                      </div>
+                                       {line.isInvoice && (
+                                         <button 
+                                           className="btn-icon-sm" 
+                                           onClick={(e) => {
+                                             e.stopPropagation();
+                                             toggleExclude(line.id_movimiento);
+                                           }}
+                                           title="Descartar del flujo"
+                                           style={{ color: '#ef4444' }}
+                                         >
+                                           <X size={12} />
+                                         </button>
+                                       )}
                                     </td>
                                   </tr>
                                 ))}

@@ -1,8 +1,23 @@
+import { useMemo } from 'react';
 import { Search, X, DollarSign } from 'lucide-react';
 import MultiSelect from './MultiSelect';
 import ICGIToggle from './ICGIToggle';
 
-export default function BudgetFilters({ filters, filterOptions, onFilterChange }) {
+/**
+ * Determina si una cuenta contable pertenece a las categorías excluidas por "CGI sin Salarios".
+ * Replica la lógica del backend (BudgetService.js L209-228) en el frontend para sincronizar
+ * el MultiSelect de cuentas con el toggle.
+ */
+function isCuentaExcludedByCGI(cuentaContable, cuenta) {
+  const isIngreso = (cuenta || '').startsWith('01');
+  const cc = (cuentaContable || '').toLowerCase();
+  const isSalary = cc.includes('salario') || cc.includes('sueldo');
+  const isExtra = cc.includes('comision') || cc.includes('bonificacion')
+    || cc.includes('industria y comercio') || cc.includes('compra implemento');
+  return isIngreso || isSalary || isExtra;
+}
+
+export default function BudgetFilters({ filters, filterOptions, onFilterChange, budgetLines = [] }) {
   const handleTextChange = (e) => {
     onFilterChange({ ...filters, search: e.target.value });
   };
@@ -11,15 +26,33 @@ export default function BudgetFilters({ filters, filterOptions, onFilterChange }
     onFilterChange({ escenario: [1] }); // Reset to default scenario
   };
 
+  /**
+   * Mapa de cuentaContable → cuenta (código numérico) derivado de las líneas activas.
+   * Se usa para replicar en frontend la misma lógica de exclusión del backend.
+   */
+  const cuentaMap = useMemo(() => {
+    const map = {};
+    budgetLines.forEach(l => {
+      if (l.cuentaContable) map[l.cuentaContable] = l.cuenta || '';
+    });
+    return map;
+  }, [budgetLines]);
+
   // Activa/desactiva el filtro rápido "CGI sin Salarios"
   const toggleSinSalarios = () => {
     const active = filters.excludeSalarios === true || filters.excludeSalarios === 'true';
     if (active) {
+      // Desactivar: quitar tanto excludeSalarios como la selección de cuentas derivada
       // eslint-disable-next-line no-unused-vars
-      const { excludeSalarios, ...rest } = filters;
+      const { excludeSalarios, cuentaContable, ...rest } = filters;
       onFilterChange(rest);
     } else {
-      onFilterChange({ ...filters, excludeSalarios: true });
+      // Activar: calcular las cuentas que NO son excluidas y setearlas en el filtro
+      const allCuentas = filterOptions?.cuentasContables || [];
+      const cuentasFiltradas = allCuentas.filter(
+        cc => !isCuentaExcludedByCGI(cc, cuentaMap[cc])
+      );
+      onFilterChange({ ...filters, excludeSalarios: true, cuentaContable: cuentasFiltradas });
     }
   };
 

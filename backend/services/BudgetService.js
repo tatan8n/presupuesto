@@ -216,8 +216,15 @@ async function getBudgetLines(filters = {}) {
     });
   }
 
-  // Filtro especial: costos, gastos fijos e inversiones SIN salarios
-  if (cleanFilters.excludeSalarios === 'true' || cleanFilters.excludeSalarios === true) {
+  // Filtro especial: costos, gastos fijos e inversiones SIN salarios.
+  // REGLA: Solo se aplica si cuentaContable NO está fijado explícitamente.
+  // Cuando cuentaContable está presente, es la fuente de verdad (puede incluir
+  // cuentas que normalmente excluiría este flag, por elección manual del usuario).
+  const hasCuentaContableFilter = cleanFilters.cuentaContable &&
+    toArray(cleanFilters.cuentaContable).length > 0;
+
+  if (!hasCuentaContableFilter &&
+      (cleanFilters.excludeSalarios === 'true' || cleanFilters.excludeSalarios === true)) {
     result = result.filter(line => {
       const isIngreso = (line.cuenta || '').startsWith('01');
       const cc = (line.cuentaContable || '').toLowerCase();
